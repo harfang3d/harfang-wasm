@@ -49,12 +49,17 @@ debug:
 #include <unistd.h>
 
 
+#include "../build/gen_static.h"
+
 #if PYDK_emsdk
     #include <emscripten/html5.h>
     #include <emscripten/key_codes.h>
     #include "emscripten.h"
+    /*
+    #define SDL2
     #include <SDL2/SDL.h>
     #include <SDL2/SDL_ttf.h>
+    */
 //    #include <SDL_hints.h> // SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT
     #define SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT   "SDL_EMSCRIPTEN_KEYBOARD_ELEMENT"
 
@@ -68,6 +73,7 @@ debug:
 #else
     #error "wasi unsupported yet"
 #endif
+
 
 #include "../build/gen_inittab.h"
 
@@ -292,7 +298,7 @@ embed_isatty(PyObject *self, PyObject *argv) {
     return Py_BuildValue("i", isatty(fd) );
 }
 
-
+#if SDL2
 static PyObject *
 embed_get_sdl_version(PyObject *self, PyObject *_null)
 {
@@ -301,7 +307,7 @@ embed_get_sdl_version(PyObject *self, PyObject *_null)
     SDL_GetVersion(&v);
     return Py_BuildValue("iii", v.major, v.minor, v.patch);
 }
-
+#endif
 
 static PyMethodDef mod_embed_methods[] = {
     {"run", (PyCFunction)embed_run, METH_VARARGS | METH_KEYWORDS, "start aio stepping"},
@@ -330,9 +336,9 @@ static PyMethodDef mod_embed_methods[] = {
     {"prompt", (PyCFunction)embed_prompt,  METH_NOARGS, "output the prompt"},
 
     {"isatty", (PyCFunction)embed_isatty,  METH_VARARGS, "isatty(int fd)"},
-
+#if SDL2
     {"get_sdl_version", embed_get_sdl_version, METH_NOARGS, "get_sdl_version"},
-
+#endif
     {"test", (PyCFunction)embed_test, METH_VARARGS | METH_KEYWORDS, "test"},
 
     {"webgl", (PyCFunction)embed_webgl, METH_VARARGS | METH_KEYWORDS, "test"},
@@ -547,6 +553,23 @@ main_iteration(void) {
     HOST_RETURN(0);
 }
 
+
+static void reprint(const char *fmt, PyObject *obj) {
+    PyObject* repr = PyObject_Repr(obj);
+    PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
+    const char *bytes = PyBytes_AS_STRING(str);
+    printf("REPR(%s): %s\n", fmt, bytes);
+    Py_XDECREF(repr);
+    Py_XDECREF(str);
+}
+
+
+
+
+
+
+
+
 #define EGLTEST
 
 
@@ -691,6 +714,12 @@ embed_webgl(PyObject *self, PyObject *args, PyObject *kwds)
 
 PyStatus status;
 
+#if defined(FT)
+#include <freetype2/ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
+
 int
 main(int argc, char **argv)
 {
@@ -702,7 +731,6 @@ main(int argc, char **argv)
         .bytes_argv = argv,
         .wchar_argv = NULL
     };
-
 
     PyImport_AppendInittab("embed", init_embed);
 
@@ -840,15 +868,27 @@ EM_ASM({
     if (1) {
         SYSCALLS.getStreamFromFD(0).tty = true;
         SYSCALLS.getStreamFromFD(1).tty = true;
-        SYSCALLS.getStreamFromFD(2).tty = true;
+        SYSCALLS.getStreamFromFD(2).tty = false;
     }
 
 }, FD_BUFFER_MAX, io_shm[0], io_shm[IO_RAW], io_shm[IO_RCON]);
 
 
-    PyRun_SimpleString("import sys, os, json, builtins, shutil, time;");
+    PyRun_SimpleString("import sys, os, json, builtins, shutil, time");
+    //PyRun_SimpleString("import hpy;import hpy.universal;print('HPy init done')");
+#if defined(FT)
+    int error;
 
+    FT_Library library;
+    error = FT_Init_FreeType(&library);
+    if (error) {
+        printf("FT error %d\n", error);
+    } else {
+        puts(" @@@@@@@@@@@@@@@@@@@@@ FT OK @@@@@@@@@@@@@@@@@@@@");
+    }
+#endif
 
+#if SDL2
     // SDL2 basic init
     {
         if (TTF_Init())
@@ -857,7 +897,7 @@ EM_ASM({
         const char *target = "1";
         SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, target);
     }
-
+#endif
     emscripten_set_main_loop( (em_callback_func)main_iteration, 0, 1);
 
     return 0;

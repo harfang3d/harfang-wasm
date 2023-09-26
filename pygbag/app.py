@@ -41,7 +41,7 @@ AUTO_REBUILD = True
 if devmode:
     sys.argv.remove("--dev")
     DEFAULT_PORT = 8666
-    DEFAULT_CDN = f"http://localhost:8000/archives/{cdn_version}/"
+    DEFAULT_CDN = f"http://localhost:8000/pygbag/0.0/"
     DEFAULT_TMPL = "static/wip.tmpl"
     print(
         f"""
@@ -175,6 +175,9 @@ async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
 
     sys.argv.pop()
 
+    if "--git" in sys.argv:
+        sys.argv.remove("--git")
+
     parser = argparse.ArgumentParser()
 
     print(
@@ -188,17 +191,19 @@ async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
         metavar="ADDRESS",
         help="Specify alternate bind address [default: localhost]",
     )
-    parser.add_argument(
-        "--directory",
-        default=build_dir.as_posix(),
-        help="Specify alternative directory [default:%s]" % build_dir,
-    )
+
+    #    parser.add_argument(
+    #        "--directory",
+    #        default=build_dir.as_posix(),
+    #        help="Specify alternative directory [default:%s]" % build_dir,
+    #    )
 
     parser.add_argument(
         "--PYBUILD",
         default="3.11",
         help="Specify python version [default:%s]" % "3.11",
     )
+
     parser.add_argument(
         "--app_name",
         default=app_folder.name,
@@ -282,6 +287,14 @@ async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
 
     args = parser.parse_args()
 
+    # when in browser IDE everything should be done in allowed folder
+
+    # force build directory in sourcefolder
+    args.directory = build_dir.as_posix()
+
+    # force cache directory to be inside build folder
+    args.cache = cache_dir.as_posix()
+
     app_name = app_folder.name.lower().replace(" ", ".")
 
     archfile = build_dir.joinpath(f"{app_name}.apk")
@@ -300,6 +313,9 @@ app_folder={app_folder}
 
 # artefacts directory
 build_dir={build_dir}
+
+# cache directory
+cache={cache_dir}
 
 # the window title and icon name
 app_name={app_name}

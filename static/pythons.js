@@ -1,5 +1,26 @@
 "use strict";
 
+/*  BF2 is still broken see  https://github.com/jvilk/BrowserFS/issues/325
+import { configure, BFSRequire, EmscriptenFS } from './browserfs.mjs';
+//import { Buffer } from 'buffer';
+
+window.BrowserFS = {}
+window.BrowserFS.configure = configure
+window.BrowserFS.BFSRequire = BFSRequire
+window.BrowserFS.EmscriptenFS = EmscriptenFS
+window.BrowserFS.Buffer = BFSRequire('buffer')
+*/
+var bfs2 = false
+
+async function import_browserfs() {
+    console.warn("late import", config.cdn+"browserfs.min.js" )
+    var script = document.createElement("script")
+    script.src = vm.config.cdn + "browserfs.min.js"
+    document.head.appendChild(script)
+    await _until(defined)("BrowserFS")
+}
+
+
 /*  Facilities implemented in js
 
     js.SVG     : convert svg to png
@@ -182,33 +203,37 @@ window.cross_file = function * cross_file(url, store, flags) {
     cross_file.dlcomplete = 1
     var content = 0
     var response = null
-    console.log("cross_file.fetch", url, flags || FETCH_FLAGS )
+    console.log("Begin.cross_file.fetch", url, flags || FETCH_FLAGS )
+
     fetch(url, flags || FETCH_FLAGS)
         .then( resp => {
                 response = resp
+                console.log("cross_file.fetch", response.status)
                 if (checkStatus(resp))
                     return response.arrayBuffer()
+                else {
+                    console.warn("got wrong status", response)
+                }
             })
         .then( buffer => content = new Uint8Array(buffer) )
-        .catch(x => response.error = new Error(x) )
+        .catch(x => {
+                response = { "error" : new Error(x) }
+            })
 
     while (!response)
         yield content
 
-    console.warn("got response", response, "len", response.headers.get("Content-Length"))
-
     while (!content && !response.error )
         yield content
 
-    //console.warn("got content or error", content || response.error)
-
     if (response.error) {
-        console.error("cross_file:", response.error)
+        console.warn("cross_file.error :", response.error)
         return response.error
+    } else {
+        // console.warn("got response", response, "len", response.headers.get("Content-Length"))
     }
-
     FS.writeFile(store, content )
-    console.log("cross_file.fetch", store, "r/w=", content.byteLength )
+    console.log("End.cross_file.fetch", store, "r/w=", content.byteLength)
     cross_file.dlcomplete = content.byteLength
     yield store
 }
@@ -264,14 +289,14 @@ function prerun(VM) {
 
     VM.FS = FS
 
-
+/*
     if (window.BrowserFS) {
-        vm.BFS = new BrowserFS.EmscriptenFS()
+        VM.BFS = new BrowserFS.EmscriptenFS()
         VM.BFS.Buffer = BrowserFS.BFSRequire('buffer').Buffer
     } else {
-        console.error("VM.prefun","BrowserFS not found")
+        console.error("VM.prerun","BrowserFS not found")
     }
-
+*/
     const sixel_prefix = String.fromCharCode(27)+"Pq"
 
 
@@ -554,19 +579,12 @@ async function custom_postrun() {
     console.warn("VM.postrun Begin")
     const pyrc_url = vm.config.cdn + "pythonrc.py"
     var content = 0
-    console.log("cross_file.fetch", pyrc_url )
-
 
     fetch(pyrc_url, {})
         .then( response => checkStatus(response) && response.arrayBuffer() )
         .then( buffer => run_pyrc(new Uint8Array(buffer)) )
         .catch(x => console.error(x))
-/*
-    store_file(
-        "https://pygame-web.github.io/archives/repo/repodata.json",
-        "/data/data/org.python/repodata.json"
-    )
-*/
+
     console.warn("VM.postrun End")
 }
 
@@ -588,9 +606,9 @@ function feat_gui(debug_hidden) {
         return new_canvas
     }
 
+
+
     if (!canvas2d) {
-        config.user_canvas = config.user_canvas || 0 //??=
-        config.user_canvas_managed = config.user_canvas_managed || 0 //??=
         canvas2d =  add_canvas("canvas")
         canvas2d.style.position = "absolute"
         canvas2d.style.top = "0px"
@@ -599,10 +617,11 @@ function feat_gui(debug_hidden) {
         //var ctx = canvas.getContext("2d")
     } else {
         // user managed canvas
-        config.user_canvas = 1
-        config.user_canvas_managed = config.user_canvas_managed || 0 //??=
 console.warn("TODO: user defined canvas")
     }
+
+    config.user_canvas = config.user_canvas || 0 //??=
+    config.user_canvas_managed = config.user_canvas_managed || 0 //??=
 
     vm.canvas2d = canvas2d
 
@@ -616,15 +635,11 @@ console.warn("TODO: user defined canvas")
     }
     vm.canvas3d = canvas3d
 
+
+    canvas.addEventListener("click", MM.focus_handler)
 /*
 
 
-    function event_canvas_regain(event) {
-        console.log("entering canvas")
-        canvas.focus();
-    }
-
-    canvas.addEventListener('mouseenter', event_canvas_regain, false);
 
     function event_fullscreen(event){
         if (!event.target.hasAttribute('fullscreen')) return;
@@ -654,12 +669,14 @@ console.warn("TODO: user defined canvas")
         if (vm.config.debug) {
             max_width = max_width * .80
             max_height = max_height * .80
+        } else {
+            // max_height -= 150
         }
 
         want_w = max_width
         want_h = max_height
 
-        console.log("window_canvas_adjust:", want_w, want_h )
+
         if (window.devicePixelRatio != 1 )
             console.warn("Unsupported device pixel ratio", window.devicePixelRatio)
 
@@ -679,13 +696,17 @@ console.warn("TODO: user defined canvas")
 
         // constraints
         if (want_h > max_height) {
+            if (vm.config.debug)
+                console.warn("too tall : have",max_height,"want",want_h)
             want_h = max_height
             want_w = want_h * ar
         }
 
         if (want_w > max_width) {
-                want_w = max_width
-                want_h = want_h / ar
+            if (vm.config.debug)
+                console.warn("too wide : have",max_width,"want",want_w)
+            want_w = max_width
+            want_h = want_h / ar
         }
 
 
@@ -810,7 +831,7 @@ console.log(" @@@@@@@@@@@@@@@@@@@@@@ 3D CANVAS @@@@@@@@@@@@@@@@@@@@@@")
             return vm.config.user_canvas_managed
 
         if (!window.canvas) {
-            console.warning("777: No canvas defined")
+            console.warn("777: No canvas defined")
             return
         }
 
@@ -841,21 +862,14 @@ console.log(" @@@@@@@@@@@@@@@@@@@@@@ 3D CANVAS @@@@@@@@@@@@@@@@@@@@@@")
 
 
 
-
-
 // file transfer (upload)
 
 async function feat_fs(debug_hidden) {
     var uploaded_file_count = 0
 
     if (!window.BrowserFS) {
-        console.warn("late import", config.cdn+"browserfs.min.js" )
-        var script = document.createElement("script")
-        script.src = vm.config.cdn + "browserfs.min.js"
-        document.head.appendChild(script)
-        await _until(defined)("BrowserFS")
+        await import_browserfs()
     }
-
 
     function readFileAsArrayBuffer(file, success, error) {
         var fr = new FileReader();
@@ -997,29 +1011,89 @@ function feat_stdout() {
 // TODO make a queue, python is not always ready to receive those events
 // right after page load
 
-function feat_lifecycle() {
-        window.addEventListener("focus", function(e){
-            queue_event("focus", e )
-        })
 
-        window.addEventListener("blur", function(e){
-            queue_event("blur", e )
-        })
+function focus_handler(ev) {
+    if (ev.type == "click") {
+        canvas.removeEventListener("click", MM.focus_handler)
+        canvas.focus()
+        return
+    }
+
+    if (ev.type == "mouseenter") {
+        canvas.focus()
+        console.log("canvas focus set")
+        if (MM.focus_lost && MM.current_trackid) {
+            console.warn("resuming music queue")
+            MM[MM.current_trackid].media.play()
+        }
+
+        canvas.removeEventListener("mouseenter", MM.focus_handler)
+        return
+    }
+
+    if (ev.type == "focus") {
+        queue_event("focus", ev )
+        console.log("focus set")
+        canvas.focus()
+        return
+    }
+
+    // for autofocus
+    if (ev.type == "blur") {
+        // remove initial focuser that may still be there
+        try {
+            canvas.removeEventListener("click", MM.focus_handler)
+        } catch (x ) {}
+
+        canvas.addEventListener("click", MM.focus_handler)
+        canvas.addEventListener("mouseenter", MM.focus_handler)
+        queue_event("blur", ev )
+        return
+    }
+}
+
+
+function feat_lifecycle() {
+        window.addEventListener("focus", MM.focus_handler)
+        window.addEventListener("blur", MM.focus_handler)
 
         if (!vm.config.can_close) {
             window.onbeforeunload = function() {
-                var message = "Are you sure you want to navigate away from this page ?";
-                    if (confirm(message)) return message;
-                    else return false;
+                console.warn("window.onbeforeunload")
+                if (MM.current_trackid) {
+                    console.warn("pausing music queue")
+                    MM.focus_lost = 1
+                    MM[MM.current_trackid].media.pause()
+                } else {
+                    console.warn("not track playing")
+                }
+                const message = "Are you sure you want to navigate away from this page ?"
+                if (confirm(message)) {
+                    return message
+                } else {
+                    return false
+                }
             }
         }
 }
 
+
 function feat_snd() {
     // to set user media engagement status and possibly make it blocking
     MM.UME = !vm.config.ume_block
-    if (!MM.UME)
+    MM.is_safari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (!MM.UME && !MM.is_safari)
         MM_play( {auto:1, test:1, media: new Audio(config.cdn+"empty.ogg")} , 1)
+
+    if (MM.is_safari) {
+        MM.is_safari = function unlock_ume() {
+                console.warn("safari ume unlocking")
+                MM.UME = 1
+                window.removeEventListener("click", MM.is_safari)
+                MM.is_safari = 1
+            }
+        window.addEventListener("click", MM.is_safari)
+    }
 }
 
 // ============================== event queue =============================
@@ -1062,57 +1136,120 @@ function download(diskfile, filename) {
 
 
 
-
-
-
-window.MM = { tracks : 0, UME : true, download : download, camera : {} }
+window.MM = {
+    tracks : 0,
+    trackid_current : 0,
+    next : "",
+    next_hint : "",
+    next_loops : 0,
+    next_tid : 0,
+    transition : 0,
+    UME : true,
+    download : download,
+    focus_lost : 0,
+    focus_handler : focus_handler,
+    camera : {}
+}
 
 async function media_prepare(trackid) {
     const track = MM[trackid]
+
 
     await _until(defined)("avail", track)
 
     if (track.type === "audio") {
         //console.log(`audio ${trackid}:${track.url} ready`)
+        return
     }
 
     if (track.type === "fs") {
         console.log(`fs ${trackid}:${track.url} => ${track.path} ready`)
+        return
     }
 
+
     if (track.type === "mount") {
+
+        if (!vm.BFS) {
+            await import_browserfs()
+
+            // how is passed the FS object ???
+            vm.BFS = new BrowserFS.EmscriptenFS()  // {FS:vm.FS}
+
+            vm.BFS.Buffer = BrowserFS.BFSRequire('buffer').Buffer
+        }
+
         // async
-        MM[trackid].media = vm.BFS.Buffer.from( MM[trackid].data )
+        MM[trackid].media = await vm.BFS.Buffer.from( MM[trackid].data )
 
         track.mount.path = track.mount.path || '/' //??=
 
         const hint = `${track.mount.path}@${track.mount.point}:${trackid}`
 
-        function apk_cb(e, apkfs){
-            console.log(__FILE__, "930 mounting", hint, "onto", track.mount.point)
-
-            BrowserFS.FileSystem.InMemory.Create(
-                function(e, memfs) {
-                    BrowserFS.FileSystem.OverlayFS.Create({"writable" :  memfs, "readable" : apkfs },
-                        function(e, ovfs) {
-                            BrowserFS.FileSystem.MountableFileSystem.Create({
-                                '/' : ovfs
-                                }, async function(e, mfs) {
-                                    await BrowserFS.initialize(mfs);
-                                    await vm.FS.mount(vm.BFS, {root: track.mount.path}, track.mount.point );
-                                    setTimeout(()=>{track.ready=true}, 0)
-                                })
-                        }
-                    );
-                }
-            );
+        if (!vm.BFS) {
+            // how is passed the FS object ???
+            vm.BFS = new BrowserFS.EmscriptenFS()  // {FS:vm.FS}
+            vm.BFS.Buffer = BrowserFS.BFSRequire('buffer').Buffer
         }
 
-        await BrowserFS.FileSystem.ZipFS.Create(
-            {"zipData" : track.media, "name": hint},
-            apk_cb
-        )
-    }
+        const track_media = MM[trackid].media
+
+        if (!bfs2) {
+            console.warn(" ==================== BFS1 ===============")
+            BrowserFS.InMemory = BrowserFS.FileSystem.InMemory
+            BrowserFS.OverlayFS = BrowserFS.FileSystem.OverlayFS
+            BrowserFS.MountableFileSystem = BrowserFS.FileSystem.MountableFileSystem
+            BrowserFS.ZipFS = BrowserFS.FileSystem.ZipFS
+
+            function apk_cb(e, apkfs){
+                console.log(__FILE__, "930 mounting", hint, "onto", track.mount.point)
+
+                BrowserFS.InMemory.Create(
+                    function(e, memfs) {
+                        BrowserFS.OverlayFS.Create({"writable" :  memfs, "readable" : apkfs },
+                            function(e, ovfs) {
+                                BrowserFS.MountableFileSystem.Create({
+                                    '/' : ovfs
+                                    }, async function(e, mfs) {
+                                        await BrowserFS.initialize(mfs);
+                                        await vm.FS.mount(vm.BFS, {root: track.mount.path}, track.mount.point);
+                                        setTimeout(()=>{track.ready=true}, 0)
+                                    })
+                            }
+                        );
+                    }
+                );
+            }
+
+            await BrowserFS.ZipFS.Create(
+                {"zipData" : track_media, "name": hint},
+                apk_cb
+            )
+
+        } else { // bfs1
+            console.warn(" ==================== BFS2 ===============")
+
+            // assuming FS is from Emscripten
+            await BrowserFS.configure({
+                fs: 'MountableFileSystem',
+                options: {
+                    '/': {
+                        fs: 'OverlayFS',
+                        options: {
+                            readable: { fs: 'ZipFS', options: { zipData: track_media, name: 'hint'  } },
+                            writable: { fs: 'InMemory' }
+                        }
+                    }
+                }
+            });
+
+            vm.FS.mount(vm.BFS, { root: track.mount.path, }, track.mount.point);
+
+        } // bfs2
+
+        setTimeout(()=>{track.ready=true}, 0)
+
+    } // track type mount
 }
 
 
@@ -1138,30 +1275,6 @@ function MM_play(track, loops) {
 }
 
 
-
-function MM_autoevents(track) {
-    const media = track.media
-
-    if (media.MM_autoevents) {
-        return
-    }
-
-    media.addEventListener("canplaythrough", (event) => {
-        track.ready = true
-        if (track.auto)
-            media.play()
-    })
-
-    media.addEventListener('ended', (event) => {
-        if (track.loops<0)
-            media.play()
-
-        if (track.loops>0) {
-            track.loops--;
-            media.play()
-        }
-    })
-}
 
 
 window.cross_track = async function cross_track(trackid, url, flags) {
@@ -1268,7 +1381,7 @@ console.log("MM.cross_track", trackid, transport, type, url )
 
         track.play = (loops) => { MM_play( track, loops) }
 
-        MM_autoevents(track)
+        MM_autoevents(track, trackid)
 
     }
 
@@ -1294,7 +1407,7 @@ MM.load = function load(trackid, loops) {
 
 
     if (track.type === "audio") {
-        MM_autoevents( track )
+        MM_autoevents( track , trackid )
         return trackid
     }
 
@@ -1312,10 +1425,12 @@ MM.load = function load(trackid, loops) {
 MM.play = function play(trackid, loops, start, fade_ms) {
     console.log("MM.play",trackid, loops, MM[trackid] )
     const track = MM[trackid]
+
     track.loops = loops
-    if (track.ready)
+
+    if (track.ready) {
         track.media.play()
-    else {
+    } else {
         console.warn("Cannot play before user interaction, will retry", track )
         function play_asap() {
             if (track.ready) {
@@ -1332,7 +1447,20 @@ MM.stop = function stop(trackid) {
     console.log("MM.stop", trackid, MM[trackid] )
     MM[trackid].media.currentTime = 0
     MM[trackid].media.pause()
+    MM.current_trackid = 0
 }
+
+MM.get_pos = function get_pos(trackid) {
+    if (MM.transition)
+        return 0
+
+    const track = MM[trackid]
+
+    if (track && track.media)
+        return MM[trackid].media.currentTime
+    return -1
+}
+
 
 
 MM.pause = function pause(trackid) {
@@ -1342,6 +1470,7 @@ MM.pause = function pause(trackid) {
 
 MM.unpause = function unpause(trackid) {
     console.log("MM.unpause", trackid, MM[trackid] )
+    MM.current_trackid = trackid
     MM[trackid].media.play()
 }
 
@@ -1357,6 +1486,56 @@ MM.set_socket = function set_socket(mode) {
     vm["websocket"]["url"] = mode
     console.log("WebSocket default mode is now :", mode)
 }
+
+
+function MM_autoevents(track, trackid) {
+    const media = track.media
+
+    if (media.MM_autoevents) {
+        return
+    }
+
+    media.MM_autoevents = 1
+
+    track.media.onplaying = (event) => {
+        MM.transition = 0
+        MM.current_trackid = trackid
+    }
+
+    media.addEventListener("canplaythrough", (event) => {
+        track.ready = true
+        if (track.auto) {
+            media.play()
+        }
+    })
+
+    media.addEventListener('ended', (event) => {
+
+        if (track.loops<0) {
+            console.log("track ended - looping forever")
+            media.play()
+            return
+        }
+        if (track.loops>0) {
+            track.loops--;
+            console.log("track ended - pass", track.loops)
+            media.play()
+            return
+        }
+
+        console.log("track ended - q?", MM.next_tid)
+
+        // check a track is queued
+        if (MM.next_tid) {
+            MM.transition = 1
+            console.log("queued", MM.next_hint, "from", MM.next, "loops", MM.next_loops)
+            track.auto = true
+            MM.play(MM.next_tid, MM.next_loops)
+            MM.next_tid = 0
+        }
+    })
+}
+
 
 // js.MM.CAMERA
 
@@ -2019,7 +2198,6 @@ function auto_conf(cfg) {
         }
     }
 
-console.log("pythons found at", url )
 
     const old_url = url
 
@@ -2041,7 +2219,6 @@ console.warn("TODO: merge/replace location options over script options")
     }
 
     elems = url.rsplit('#',1)
-console.log("pythons found at", url , elems)
     url = elems.shift()
 
     if (elems.length)
@@ -2050,9 +2227,7 @@ console.log("pythons found at", url , elems)
         }
 
     elems = url.rsplit('?',1)
-console.log("pythons found at", url , elems)
     url = elems.shift()
-console.log("pythons found at", url , elems)
 
     if (elems.length)
         for (const arg of elems.pop().split("&")) {
@@ -2082,7 +2257,6 @@ console.log("pythons found at", url , elems)
             } else {
                 vm.script.interpreter = config.python || "cpython"
                 config.PYBUILD = vm.cpy_argv[0].substr(7) || "3.11"
-                console.log("no python implementation specified in ",vm.cpy_argv,", using default :",vm.script.interpreter)
             }
         }
     }
@@ -2123,8 +2297,9 @@ config.interactive = config.interactive || (location.search.search("-i")>=0) //?
 
     config._sdl2    = config._sdl2 || "canvas" //??=
 
-    if (config.ume_block === undefined)
-        config.ume_block || true //??=
+    if (config.ume_block === undefined) {
+        config.ume_block = 1 //??=
+    }
 
     console.log(JSON.stringify(config))
 
@@ -2245,23 +2420,12 @@ function auto_start(cfg) {
 
     }
 
-    console.error("auto_start done")
-
 }
-
 
 
 window.set_raw_mode = function (param) {
     window.RAW_MODE = param || 0
 }
-
-
-
-
-
-
-
-
 
 
 

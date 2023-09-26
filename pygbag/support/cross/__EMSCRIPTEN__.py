@@ -36,32 +36,6 @@ except:
     else:
         builtins.__UPY__ = None
 
-if hasattr(sys, "_emscripten_info"):
-    is_browser = not sys._emscripten_info.runtime.startswith("Node.js")
-    builtins.__EMSCRIPTEN__ = this
-    try:
-        from embed import *
-        from platform import *
-        from embed_emscripten import *
-        from embed_browser import window, document, navigator
-        from embed_browser import Audio, File, Object
-        from embed_browser import fetch, console, prompt, alert, confirm
-
-        # pyodide compat
-        sys.modules["js"] = sys.modules["embed_browser"]
-
-        Object_type = type(Object())
-    except Exception as e:
-        sys.print_exception(e)
-        pdb(__file__, ":47 no browser/emscripten modules yet", e)
-
-    def ffi(arg):
-        return window.JSON.parse(json.dumps(arg))
-
-else:
-    is_browser = False
-    builtins.__EMSCRIPTEN__ = None
-
 
 # force use a fixed, tested version of uasyncio to avoid non-determinism
 if __UPY__:
@@ -75,6 +49,7 @@ if __UPY__:
         sys.print_exception(e)
 
 else:
+    # fallback to asyncio based implementation
     try:
         from . import uasyncio_cpy as uasyncio
     except:
@@ -82,6 +57,47 @@ else:
         uasyncio = aio
 
 sys.modules["uasyncio"] = uasyncio
+
+
+# detect if cpython is really running on a emscripten browser
+
+if hasattr(sys, "_emscripten_info"):
+    is_browser = not sys._emscripten_info.runtime.startswith("Node.js")
+    builtins.__EMSCRIPTEN__ = this
+    try:
+        from embed import *
+        from platform import *
+        from embed_emscripten import *
+        from embed_browser import window, document, navigator
+        from embed_browser import Audio, File, Object
+        from embed_browser import fetch, console, prompt, alert, confirm
+
+        # broad pyodide compat
+        sys.modules["js"] = this  # instead of just sys.modules["embed_browser"]
+
+        Object_type = type(Object())
+    except Exception as e:
+        sys.print_exception(e)
+        pdb(__file__, ":47 no browser/emscripten modules yet", e)
+
+    def ffi(arg):
+        return window.JSON.parse(json.dumps(arg))
+
+    async def jsiter(iterator):
+        mark = None
+        value = undefined
+        while mark != undefined:
+            value = mark
+            await aio.sleep(0)
+            mark = next(iterator, undefined)
+        return value
+
+    async def jsprom(prom):
+        return await jsiter(platform.window.iterator(prom))
+
+else:
+    is_browser = False
+    builtins.__EMSCRIPTEN__ = None
 
 
 def init_platform(embed):
@@ -131,11 +147,15 @@ if is_browser:
         events = []
 
         def addEventListener(self, host, type, listener, options=None, useCapture=None):
-            cli = self.clients.setdefault(type, [])
+            cli = self.__class__.clients.setdefault(type, [])
             cli.append(listener)
 
         def build(self, evt_name, jsondata):
-            self.events.append([evt_name, json.loads(jsondata)])
+            try:
+                self.__class__.events.append([evt_name, json.loads(jsondata.strip('"'))])
+            except Exception as e:
+                sys.print_exception(e)
+                print(jsondata)
 
         # def dispatchEvent
         async def rpc(self, method, *argv):
@@ -151,6 +171,8 @@ if is_browser:
                     client(*argv)
             else:
                 print(f"RPC not found: {method}{argv}")
+
+        # This is a green thread handling events from js -> python
 
         async def process(self):
             import inspect
@@ -176,13 +198,14 @@ if is_browser:
                             await client(sns)
                         else:
                             client(sns)
+
                     if discarded:
-                        console.log(f"221 DISCARD : {evtype} {evdata}")
+                        console.log(f"221: DISCARD : {evtype} {evdata}")
 
                 await aio.sleep(0)
 
     EventTarget = EventTarget()
-
+    add_event_listener = EventTarget.addEventListener
 
 # =============================  PRELOADING      ==============================
 

@@ -36,7 +36,7 @@ from . import cross
 cross.DEBUG = DEBUG
 
 
-# file+socket support
+# file+socket support  fopen/sopen
 from .filelike import *
 
 # =========================================================================
@@ -141,6 +141,8 @@ leave = enter + spent
 
 
 from asyncio import *
+
+__run__ = run
 
 import asyncio.events as events
 
@@ -326,6 +328,15 @@ def create_task(coro, *, name=None, context=None):
 run_called = False
 
 
+def is_running():
+    global started
+    return started
+
+
+# prevent warnings in aiohttp
+loop.is_running = is_running
+
+
 def run(coro, *, debug=False):
     global paused, loop, started, step, DEBUG, run_called, exit
 
@@ -350,12 +361,19 @@ def run(coro, *, debug=False):
         exit = False
         run_called = True
         started = True
-        # the stepper fonction when in simulator
-        if cross.scheduler:
-            if debug:
-                pdb("261: asyncio handler is", cross.scheduler)
-            paused = False
-            cross.scheduler(step, 1)
+
+        # the stepper fonction when in simulator is called from pygbag.aio
+        # and is blocking script
+        if aio.cross.simulator:
+            # cannot be sure asyncio.run() will be used
+            # so don't handle loop here
+            return
+
+        #        if cross.scheduler:
+        #            if debug:
+        #                pdb("261: asyncio handler is", cross.scheduler)
+        #            paused = False
+        #            cross.scheduler(step, 1)
 
         # the stepper when called from  window.requestAnimationFrame()
         # https://developer.mozilla.org/en-US/docs/Web/API/window/requestAnimationFrame
@@ -377,9 +395,9 @@ def run(coro, *, debug=False):
             try:
                 loop.run_forever()
             except KeyboardInterrupt:
+                print("301: closing loop")
                 loop.close()
 
-        print(f"378: asyncio.run({coro=})")
     elif run_called:
         pdb("273: aio.run called twice !!!")
 
@@ -392,6 +410,9 @@ def run(coro, *, debug=False):
 
 def exit_now(ec):
     global exit, paused
+    if exit:
+        print("already exiting ...")
+        return
     # rescheduling happens only where started is True
     exit = True
     while len(tasks):

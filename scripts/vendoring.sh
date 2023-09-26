@@ -2,18 +2,23 @@
 
 # default is to build pygame only
 export VENDOR=${VENDOR:-pygbag}
-export PACKAGES=${PACKAGES:-emsdk pygame}
+export PACKAGES=${PACKAGES:-emsdk hpy pygame}
 
 export SDKROOT=${SDKROOT:-/opt/python-wasm-sdk}
-export SDK_VERSION=${SDK_VERSION:-3.1.22.0}
-export CYTHON=${CYTHON:-Cython-3.0.0-py2.py3-none-any.whl}
+export SDK_VERSION=${SDK_VERSION:-3.1.46.1bi}
+export CYTHON=${CYTHON:-Cython-3.0.1-py2.py3-none-any.whl}
 export PYBUILD=${PYBUILD:-3.11}
 export LC_ALL=C
 
 export SYS_PYTHON=${SYS_PYTHON:-$(which python3)}
 
+if $CI
+then
+    export PYGBAG_BUILD=0.0
+else
+    export PYGBAG_BUILD=$($SYS_PYTHON -c "print(__import__('pygbag').__version__)"|tail -n 1|cut -f1-2 -d.)
+fi
 
-export PYGBAG_BUILD=$($SYS_PYTHON -c "print(__import__('pygbag').__version__)"|tail -n 1|cut -f1-2 -d.)
 export DIST_DIR=$(pwd)/build/web/archives/${PYGBAG_BUILD}
 mkdir -p $DIST_DIR
 
