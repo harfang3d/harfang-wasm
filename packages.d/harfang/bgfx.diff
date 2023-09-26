@@ -1,0 +1,79 @@
+diff --git a/src/glcontext_html5.cpp b/src/glcontext_html5.cpp
+index 2e8d939dc..3a16f8ad6 100644
+--- a/src/glcontext_html5.cpp
++++ b/src/glcontext_html5.cpp
+@@ -2,7 +2,7 @@
+  * Copyright 2011-2022 Branimir Karadzic. All rights reserved.
+  * License: https://github.com/bkaradzic/bgfx/blob/master/LICENSE
+  */
+-
++#include <stdio.h>
+ #include "bgfx_p.h"
+ 
+ #if BGFX_CONFIG_RENDERER_OPENGLES
+@@ -65,6 +65,7 @@ namespace bgfx { namespace gl
+ 
+ 	void GlContext::create(uint32_t _width, uint32_t _height)
+ 	{
++        puts("68 GlContext::create");
+ 		// assert?
+ 		if (m_primary != NULL)
+ 			return;
+@@ -124,6 +125,19 @@ namespace bgfx { namespace gl
+ 
+ 	SwapChainGL* GlContext::createSwapChain(void* _nwh)
+ 	{
++		const char* canvas = (const char*) _nwh;
++        EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context;
++        SwapChainGL* swapChain;
++
++        if ( (context = emscripten_webgl_get_current_context()) ) {
++
++            emscripten_webgl_make_context_current(context);
++			swapChain = BX_NEW(g_allocator, SwapChainGL)(context, canvas);
++			import(2);
++            printf("Re using WebGL context %i\n", context);
++			return swapChain;
++        }
++
+ 		emscripten_webgl_init_context_attributes(&s_attrs);
+ 
+ 		// Work around bug https://bugs.chromium.org/p/chromium/issues/detail?id=1045643 in Chrome
+@@ -136,19 +150,19 @@ namespace bgfx { namespace gl
+ 		s_attrs.antialias                 = false;
+ 
+ 		s_attrs.minorVersion = 0;
+-		const char* canvas = (const char*) _nwh;
+ 		int error = 0;
+ 
+ 		for (int version = 2; version >= 1; --version)
+ 		{
+ 			s_attrs.majorVersion = version;
+-			EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = emscripten_webgl_create_context(canvas, &s_attrs);
++			//EMSCRIPTEN_WEBGL_CONTEXT_HANDLE
++            context = emscripten_webgl_create_context(canvas, &s_attrs);
+ 
+ 			if (context > 0)
+ 			{
+ 				EMSCRIPTEN_CHECK(emscripten_webgl_make_context_current(context) );
+ 
+-				SwapChainGL* swapChain = BX_NEW(g_allocator, SwapChainGL)(context, canvas);
++				swapChain = BX_NEW(g_allocator, SwapChainGL)(context, canvas);
+ 
+ 				import(version);
+ 
+diff --git a/src/renderer_gl.cpp b/src/renderer_gl.cpp
+index ca3f60557..d72b56847 100644
+--- a/src/renderer_gl.cpp
++++ b/src/renderer_gl.cpp
+@@ -3280,7 +3280,9 @@ namespace bgfx { namespace gl
+ 		{
+ 			m_program[_handle.idx].destroy();
+ 		}
+-
++#if defined(__EMSCRIPTEN__)
++__attribute__ ((visibility ("hidden")))
++#endif
+ 		void* createTexture(TextureHandle _handle, const Memory* _mem, uint64_t _flags, uint8_t _skip) override
+ 		{
+ 			m_textures[_handle.idx].create(_mem, _flags, _skip);

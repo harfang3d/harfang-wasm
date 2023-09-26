@@ -1,0 +1,30 @@
+diff --git a/src/cmft/common/platform.h b/src/cmft/common/platform.h
+index df2efc6..bbec58a 100644
+--- a/src/cmft/common/platform.h
++++ b/src/cmft/common/platform.h
+@@ -73,7 +73,7 @@
+ #   undef CMFT_PTR_SIZE
+ #   define CMFT_PTR_SIZE 4
+ #else
+-#   error Unsupported platform!
++#   warning Unsupported platform!
+ #endif
+ 
+ #if (0                        \
+diff --git a/src/cmft/image.cpp b/src/cmft/image.cpp
+index 1f1160d..7633f0d 100644
+--- a/src/cmft/image.cpp
++++ b/src/cmft/image.cpp
+@@ -191,6 +191,12 @@ namespace cmft
+     #elif CMFT_PLATFORM_APPLE
+     #   define fseeko64 fseeko
+     #   define ftello64 ftello
++    #elif defined(_LARGEFILE64_SOURCE)
++        /* for glibc system that support LFS */
++    #else
++        /* others */
++    #   define fseeko64 fseeko
++    #   define ftello64 ftello
+     #endif // CMFT_
+ 
+     int64_t rwSeekFile(Rw* _rw, int64_t _offset = 0, Whence::Enum _whence = Whence::Current)

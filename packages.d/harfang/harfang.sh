@@ -175,13 +175,28 @@ fi
 
 popd
 
+EMPIC=${SDKROOT}/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic
+SDL2="-sUSE_ZLIB=1 -sUSE_BZIP2=1 -sUSE_LIBPNG -sUSE_SDL=2 -sUSE_SDL_MIXER=2 -lSDL2 -L${SDKROOT}/devices/emsdk/usr/lib -lSDL2_image -lSDL2_gfx -lSDL2_mixer -lSDL2_mixer_ogg -lSDL2_ttf -lvorbis -logg -lwebp -ljpeg -lpng -lharfbuzz -lfreetype"
+SDL2="$SDL2 -lssl -lcrypto -lffi -lbz2 -lz -ldl -lm"
+
+
 if [ -d testing/harfang-${VERSION}-cp32-abi3-wasm32_mvp_emscripten ]
 then
+    TARGET_FOLDER=$(pwd)/testing/harfang-${VERSION}-cp32-abi3-wasm32_${WASM_FLAVOUR}_emscripten
+    TARGET_FILE=${TARGET_FOLDER}/harfang/harfang.so
+
+    mkdir -p $TARGET_FOLDER
+    /bin/cp -rf testing/harfang-${VERSION}-cp32-abi3-wasm32_mvp_emscripten/. ${TARGET_FOLDER}/
+
     mkdir -p build/web/archives/repo/pkg
 
-    emcc -Os -g0 -shared -fpic -o testing/harfang-${VERSION}-cp32-abi3-wasm32_mvp_emscripten/harfang/harfang.so /opt/python-wasm-sdk/prebuilt/emsdk/libharfang${PYBUILD}.a
-    [ -f testing/harfang-${VERSION}-cp32-abi3-wasm32_mvp_emscripten/harfang/harfang.so.map ] && rm testing/harfang-${VERSION}-cp32-abi3-wasm32_mvp_emscripten/harfang/harfang.so.map
-    pushd testing/harfang-${VERSION}-cp32-abi3-wasm32_mvp_emscripten
+
+
+    emcc -Os -g0 -shared -fpic -o ${TARGET_FILE} \
+     /opt/python-wasm-sdk/prebuilt/emsdk/libharfang${PYBUILD}.a $SDL2
+
+    [ -f ${TEST_FILE}.map ] && rm ${TEST_FILE}.map
+    pushd testing/harfang-${VERSION}-cp32-abi3-wasm32_${WASM_FLAVOUR}_emscripten
     if [ -d /data/git/archives/repo ]
     then
         whl=/data/git/archives/repo/pkg/$(basename $(pwd)).whl
