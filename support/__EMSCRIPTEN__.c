@@ -4,7 +4,6 @@ static PyStatus pymain_init(const _PyArgv *args);
 static void pymain_free(void);
 
 
-
     http://troubles.md/why-do-we-need-the-relooper-algorithm-again/
 
     https://medium.com/leaningtech/solving-the-structured-control-flow-problem-once-and-for-all-5123117b1ee2
@@ -49,36 +48,139 @@ debug:
 #include <unistd.h>
 
 
-#include "../build/gen_static.h"
-
-#if PYDK_emsdk
-    #include <emscripten/html5.h>
-    #include <emscripten/key_codes.h>
-    #include "emscripten.h"
-    /*
-    #define SDL2
-    #include <SDL2/SDL.h>
-    #include <SDL2/SDL_ttf.h>
-    */
-//    #include <SDL_hints.h> // SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT
-    #define SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT   "SDL_EMSCRIPTEN_KEYBOARD_ELEMENT"
-
-    #define HOST_RETURN(value)  return value
-
-    PyObject *sysmod;
-    PyObject *sysdict;
-#   include "__EMSCRIPTEN__.embed/sysmodule.c"
-
-
-#else
-    #error "wasi unsupported yet"
-#endif
-
-
-#include "../build/gen_inittab.h"
 
 static int preloads = 0;
 static long long loops = 0;
+
+
+struct timeval time_last, time_current, time_lapse;
+
+// crude "files" used for implementing "os level" communications with host.
+
+
+#define FD_MAX 64
+#define FD_BUFFER_MAX 4096
+
+FILE *io_file[FD_MAX];
+char *io_shm[FD_MAX];
+int io_stdin_filenum;
+int io_raw_filenum;
+int io_rcon_filenum;
+
+int wa_panic = 0;
+
+#define wa_break { wa_panic=1;goto panic; }
+
+
+#define IO_RAW 3
+#define IO_RCON 4
+
+/*
+    io_shm is a raw keyboard buffer
+    io_file is the readline/file/socket interface
+*/
+static int embed_readline_bufsize = 0;
+static int embed_readline_cursor = 0;
+
+static int embed_os_read_bufsize = 0;
+static int embed_os_read_cursor = 0;
+
+
+char buf[FD_BUFFER_MAX];
+
+// TODO: store input frame counter + timestamps for all I/O
+// for ascii app record/replay.
+
+
+
+
+
+#if defined(WAPY)
+#   include "Python.h"
+#endif
+
+// ==============================================================================================
+
+#if defined(PKPY)
+#   include "Python.h"
+#else
+#   include "../build/gen_static.h"
+
+
+// ==============================================================================================
+
+
+
+#if PYDK_emsdk
+#   include <emscripten/html5.h>
+#   include <emscripten/key_codes.h>
+#   include "emscripten.h"
+#   define HOST_RETURN(value)  return value
+
+    PyObject *sysmod;
+    PyObject *sysdict;
+
+#   include "sys/time.h"  // gettimeofday
+#   include <sys/stat.h>  // umask
+
+#   if !defined(WAPY)
+#       include "__EMSCRIPTEN__.embed/sysmodule.c"
+#   endif
+#else
+#   error "wasi unsupported yet"
+#endif
+
+#if !defined(WAPY)
+#   include "../build/gen_inittab.h"
+#else
+#   pragma message  "  @@@@@@@@@@@ NOT YET ../build/gen_inittab.h @@@@@@@@@@@@"
+#endif
+
+
+// ===== HPY =======
+
+#define HPY_ABI_UNIVERSAL
+#include "hpy.h"
+
+HPyDef_METH(platform_run, "run", HPyFunc_VARARGS)
+
+static HPy
+platform_run_impl(HPyContext *ctx, HPy self, const HPy *argv, size_t argc) {
+    puts("hpy runs");
+    return HPyLong_FromLongLong(ctx, loops);
+}
+
+static HPyDef *hpy_platform_Methods[] = {
+    &platform_run,
+    NULL,
+};
+
+static HPyModuleDef hpy_platform_def = {
+    .doc = "HPy _platform",
+    .defines = hpy_platform_Methods,
+};
+
+// The Python interpreter will create the module for us from the
+// HPyModuleDef specification. Additional initialization can be
+// done in the HPy_mod_exec slot
+HPy_MODINIT(_platform, hpy_platform_def)
+
+extern PyModuleDef* _HPyModuleDef_AsPyInit(HPyModuleDef *hpydef);
+
+PyMODINIT_FUNC
+PyInit__platform(void)
+{
+    return (PyObject *)_HPyModuleDef_AsPyInit(&hpy_platform_def);
+}
+
+
+#endif // PKPY
+
+
+
+
+// ==============================================================================================
+
 
 static PyObject *
 embed_run(PyObject *self, PyObject *argv,  PyObject *kwds)
@@ -150,7 +252,6 @@ embed_test(PyObject *self, PyObject *args, PyObject *kwds)
 
 #include <emscripten/html5.h>
 #include <GLES2/gl2.h>
-
 
 static PyObject *embed_webgl(PyObject *self, PyObject *args, PyObject *kwds);
 
@@ -257,6 +358,9 @@ static PyObject *
 embed_os_read(PyObject *self, PyObject *_null); //forward
 
 static PyObject *
+embed_stdin_select(PyObject *self, PyObject *_null); // forward
+
+static PyObject *
 embed_flush(PyObject *self, PyObject *_null) {
     fprintf( stdout, "%c", 4);
     fprintf( stderr, "%c", 4);
@@ -280,14 +384,12 @@ embed_set_ps2(PyObject *self, PyObject *_null) {
 static PyObject *
 embed_prompt(PyObject *self, PyObject *_null) {
     if (sys_ps==1)
-        fprintf( stderr, ">>> ");
+        fprintf( stderr, ">=> ");
     else
         fprintf( stderr, "... ");
     embed_flush(self,_null);
     Py_RETURN_NONE;
 }
-
-
 
 static PyObject *
 embed_isatty(PyObject *self, PyObject *argv) {
@@ -297,6 +399,169 @@ embed_isatty(PyObject *self, PyObject *argv) {
     }
     return Py_BuildValue("i", isatty(fd) );
 }
+
+/*
+static PyObject *
+embed_PyErr_Clear(PyObject *self, PyObject *_null) {
+    PyErr_Clear();
+    Py_RETURN_NONE;
+}
+*/
+
+#if TEST_ASYNCSLEEP
+
+#include "pycore_ceval.h"
+#include "pycore_function.h"
+#include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "pycore_frame.h"
+
+static void
+_PyEvalFrameClearAndPop(PyThreadState *tstate, _PyInterpreterFrame * frame)
+{
+    // Make sure that this is, indeed, the top frame. We can't check this in
+    // _PyThreadState_PopFrame, since f_code is already cleared at that point:
+    assert((PyObject **)frame + frame->f_code->co_nlocalsplus +
+        frame->f_code->co_stacksize + FRAME_SPECIALS_SIZE == tstate->datastack_top);
+    tstate->recursion_remaining--;
+    assert(frame->frame_obj == NULL || frame->frame_obj->f_frame == frame);
+    assert(frame->owner == FRAME_OWNED_BY_THREAD);
+    _PyFrame_Clear(frame);
+    tstate->recursion_remaining++;
+    _PyThreadState_PopFrame(tstate, frame);
+}
+
+extern PyObject *WASM_PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int throwflag);
+
+static PyObject *
+embed_bcrun(PyObject *self, PyObject *argv) {
+    PyThreadState *tstate = _PyThreadState_GET();
+    PyObject *globals = NULL;
+    PyObject *locals = NULL;
+
+#if 0
+    const char *bc = NULL;
+    if (!PyArg_ParseTuple(argv, "y", &bc)) {
+#else
+    PyObject *co = NULL;
+    if (!PyArg_ParseTuple(argv, "OO", &co, &globals)) {
+
+#endif
+        return NULL;
+    }
+
+    PyObject *builtins = _PyEval_BuiltinsFromGlobals(tstate, globals); // borrowed ref
+    if (builtins == NULL) {
+        return NULL;
+    }
+
+
+    locals = globals;
+
+    puts("got bc");
+    /*
+    PyObject* local_dict = PyDict_New();
+    PyObject* obj = PyEval_EvalCode(co, globals , globals);
+*/
+    PyFrameConstructor desc = {
+        .fc_globals = globals,
+        .fc_builtins = builtins,
+        .fc_name = ((PyCodeObject *)co)->co_name,
+        .fc_qualname = ((PyCodeObject *)co)->co_name,
+        .fc_code = co,
+        .fc_defaults = NULL,
+        .fc_kwdefaults = NULL,
+        .fc_closure = NULL
+    };
+    PyFunctionObject *func = _PyFunction_FromConstructor(&desc);
+    if (func == NULL) {
+        return NULL;
+    }
+    PyObject* const* args = NULL;
+    size_t argcount = 0;
+    PyObject *kwnames = NULL;
+
+    //PyObject *res = _PyEval_Vector(tstate, func, locals, NULL, 0, NULL);
+    /* _PyEvalFramePushAndInit consumes the references
+     * to func and all its arguments */
+    Py_INCREF(func);
+    for (size_t i = 0; i < argcount; i++) {
+        Py_INCREF(args[i]);
+    }
+    if (kwnames) {
+        Py_ssize_t kwcount = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < kwcount; i++) {
+            Py_INCREF(args[i+argcount]);
+        }
+    }
+/*
+    _PyInterpreterFrame *frame = _PyEvalFramePushAndInit(
+        tstate, func, locals, args, argcount, kwnames);
+*/
+
+    PyCodeObject * code = (PyCodeObject *)func->func_code;
+    size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
+    CALL_STAT_INC(frames_pushed);
+    _PyInterpreterFrame *frame = _PyThreadState_BumpFramePointer(tstate, size);
+    if (frame == NULL) {
+        goto fail;
+    }
+    _PyFrame_InitializeSpecials(frame, func, locals, code->co_nlocalsplus);
+    PyObject **localsarray = &frame->localsplus[0];
+    for (int i = 0; i < code->co_nlocalsplus; i++) {
+        localsarray[i] = NULL;
+    }
+    /*
+    if (initialize_locals(tstate, func, localsarray, args, argcount, kwnames)) {
+        assert(frame->owner != FRAME_OWNED_BY_GENERATOR);
+        _PyEvalFrameClearAndPop(tstate, frame);
+    }
+    */
+    goto skip;
+
+fail:
+    /* Consume the references */
+    for (size_t i = 0; i < argcount; i++) {
+        Py_DECREF(args[i]);
+    }
+    if (kwnames) {
+        Py_ssize_t kwcount = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < kwcount; i++) {
+            Py_DECREF(args[i+argcount]);
+        }
+    }
+    PyErr_NoMemory();
+
+skip:
+
+// _PyEvalFramePushAndInit
+    if (frame == NULL) {
+        return NULL;
+    }
+
+    int throwflag = 0;
+/*
+    PyObject *retval = _PyEval_EvalFrame(tstate, frame, 0);
+    _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int throwflag)
+*/
+
+    //PyObject *retval = _PyEval_EvalFrameDefault(tstate, frame, throwflag);
+puts("479");
+    PyObject *retval = WASM_PyEval_EvalFrameDefault(tstate, frame, throwflag);
+puts("481");
+
+    assert(
+        _PyFrame_GetStackPointer(frame) == _PyFrame_Stackbase(frame) ||
+        _PyFrame_GetStackPointer(frame) == frame->localsplus
+    );
+
+    _PyEvalFrameClearAndPop(tstate, frame);
+    Py_DECREF(func);
+//_PyEval_Vector
+
+    puts("done");
+    Py_RETURN_NONE;
+}
+#endif // TEST_ASYNCSLEEP
 
 #if SDL2
 static PyObject *
@@ -309,9 +574,14 @@ embed_get_sdl_version(PyObject *self, PyObject *_null)
 }
 #endif
 
+
+
 static PyMethodDef mod_embed_methods[] = {
     {"run", (PyCFunction)embed_run, METH_VARARGS | METH_KEYWORDS, "start aio stepping"},
-
+#if TEST_ASYNCSLEEP
+    {"bcrun", (PyCFunction)embed_bcrun, METH_VARARGS, ""},
+#endif
+    //{"PyErr_Clear", (PyCFunction)embed_PyErr_Clear, METH_NOARGS, ""},
     {"preload", (PyCFunction)embed_preload,  METH_VARARGS, "emscripten_run_preload_plugins"},
     {"dlopen", (PyCFunction)embed_dlopen, METH_VARARGS | METH_KEYWORDS, ""},
     {"dlcall", (PyCFunction)embed_dlcall, METH_VARARGS | METH_KEYWORDS, ""},
@@ -329,6 +599,8 @@ static PyMethodDef mod_embed_methods[] = {
 
     {"readline", (PyCFunction)embed_readline,  METH_NOARGS, "get current line"},
     {"os_read",  (PyCFunction)embed_os_read,  METH_NOARGS, "get current raw stdin"},
+    {"stdin_select", (PyCFunction)embed_stdin_select,  METH_NOARGS, "get current raw stdin bytes length"},
+
     {"flush", (PyCFunction)embed_flush,  METH_NOARGS, "flush stdio+stderr"},
 
     {"set_ps1", (PyCFunction)embed_set_ps1,  METH_NOARGS, "set prompt output to >>> "},
@@ -341,7 +613,7 @@ static PyMethodDef mod_embed_methods[] = {
 #endif
     {"test", (PyCFunction)embed_test, METH_VARARGS | METH_KEYWORDS, "test"},
 
-    {"webgl", (PyCFunction)embed_webgl, METH_VARARGS | METH_KEYWORDS, "test"},
+    {"webgl", (PyCFunction)embed_webgl, METH_VARARGS | METH_KEYWORDS, "open a canvas as webgl"},
 
     {NULL, NULL, 0, NULL}
 };
@@ -360,10 +632,12 @@ static struct PyModuleDef mod_embed = {
 
 static PyObject *embed_dict;
 
-PyMODINIT_FUNC init_embed(void) {
+PyMODINIT_FUNC
+PyInit_embed(void) {
 
 // activate javascript bindings that were moved from libpython to pymain.
-#if defined(PYDK_emsdk)
+// but not for wapy
+#if defined(PYDK_emsdk) && !defined(WAPY)
     int res;
     sysmod = PyImport_ImportModule("sys"); // must call Py_DECREF when finished
     sysdict = PyModule_GetDict(sysmod); // borrowed ref, no need to delete
@@ -378,62 +652,29 @@ PyMODINIT_FUNC init_embed(void) {
     Py_DECREF(sysmod); // release ref to sysMod
 err_occurred:;
 type_init_failed:;
+#else
+
+        puts("PyInit_embed");
 #endif
 
 // helper module for pygbag api not well defined and need clean up.
 // callable as "platform" module.
     PyObject *embed_mod = PyModule_Create(&mod_embed);
-    embed_dict = PyModule_GetDict(embed_mod);
-    PyDict_SetItemString(embed_dict, "js2py", PyUnicode_FromString("{}"));
+
+// from old aiolink poc
+    //embed_dict = PyModule_GetDict(embed_mod);
+    //PyDict_SetItemString(embed_dict, "js2py", PyUnicode_FromString("{}"));
+
     return embed_mod;
 
 }
 
 
-struct timeval time_last, time_current, time_lapse;
-
-// crude "files" used for implementing "os level" communications with host.
-
-
-#define FD_MAX 64
-#define FD_BUFFER_MAX 4096
-
-FILE *io_file[FD_MAX];
-char *io_shm[FD_MAX];
-int io_stdin_filenum;
-int io_raw_filenum;
-int io_rcon_filenum;
-
-int wa_panic = 0;
-
-#define LOG_V puts
-#define wa_break { wa_panic=1;goto panic; }
-
-
-#define IO_RAW 3
-#define IO_RCON 4
-
-/*
-    io_shm is a raw keyboard buffer
-    io_file is the readline/file/socket interface
-*/
-static int embed_readline_bufsize = 0;
-static int embed_readline_cursor = 0;
-
-static int embed_os_read_bufsize = 0;
-static int embed_os_read_cursor = 0;
-
-
-char buf[FD_BUFFER_MAX];
-
-// TODO: store input frame counter + timestamps for all I/O
-// for ascii app record/replay.
-
 static PyObject *
 embed_readline(PyObject *self, PyObject *_null) {
 #define file io_file[0]
 
-    //char buf[FD_BUFFER_MAX];
+    //global char buf[FD_BUFFER_MAX];
     buf[0]=0;
 
     fseek(file, embed_readline_cursor, SEEK_SET);
@@ -455,7 +696,7 @@ embed_readline(PyObject *self, PyObject *_null) {
 static PyObject *
 embed_os_read(PyObject *self, PyObject *_null) {
 #define file io_file[IO_RAW]
-    //char buf[FD_BUFFER_MAX];
+    //global char buf[FD_BUFFER_MAX];
     buf[0]=0;
 
     fseek(file, embed_os_read_cursor, SEEK_SET);
@@ -471,6 +712,11 @@ embed_os_read(PyObject *self, PyObject *_null) {
     }
     return Py_BuildValue("y", buf );
 #undef file
+}
+
+static PyObject *
+embed_stdin_select(PyObject *self, PyObject *_null) {
+    return Py_BuildValue("i", embed_os_read_bufsize );
 }
 
 
@@ -508,7 +754,7 @@ main_iteration(void) {
 
     if ( (datalen =  io_file_select(IO_RCON)) ) {
 #       define file io_file[IO_RCON]
-        char buf[FD_BUFFER_MAX];
+        // global char buf[FD_BUFFER_MAX];
         while( fgets(&buf[0], FD_BUFFER_MAX, file) ) {
             if (!lines && (strlen(buf)>1)){
                 silent = ( buf[0] == '#' ) && (buf[1] == '!');
@@ -517,8 +763,6 @@ main_iteration(void) {
             if (!silent)
                 fprintf( stderr, "%d: %s", lines, buf );
         }
-
-
 
         rewind(file);
 
@@ -534,11 +778,12 @@ main_iteration(void) {
 #       undef file
     }
 
-    if ( (datalen =  io_file_select(IO_RAW)) )
+    if ( (datalen = io_file_select(IO_RAW)) ) {
         embed_os_read_bufsize += datalen;
         //printf("raw data %i\n", datalen);
+    }
 
-    if ( (datalen =  io_file_select(0)) ) {
+    if ( (datalen = io_file_select(0)) ) {
         embed_readline_bufsize += datalen;
         //printf("stdin data q+%i / q=%i dq=%i\n", datalen, embed_readline_bufsize, embed_readline_cursor);
     }
@@ -562,10 +807,6 @@ static void reprint(const char *fmt, PyObject *obj) {
     Py_XDECREF(repr);
     Py_XDECREF(str);
 }
-
-
-
-
 
 
 
@@ -601,6 +842,7 @@ EMSCRIPTEN_KEEPALIVE void egl_test() {
     EGLDisplay display = NULL;
     EGLNativeWindowType dummyWindow = 0;
     EGLConfig config;
+
 
 #if 0
 
@@ -693,35 +935,56 @@ fail:
     puts("EGL test failed");
 }
 
-#endif
+#endif // EGLTEST
 
 static PyObject *
-embed_webgl(PyObject *self, PyObject *args, PyObject *kwds)
+embed_webgl(PyObject *self, PyObject *argv, PyObject *kw)
 {
-    // setting up EmscriptenWebGLContextAttributes
-    #if defined(EGLTEST)
-    egl_test();
-    #endif
 
-    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = emscripten_webgl_get_current_context();
-    //EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = emscripten_webgl_create_context("#canvas3d", &attr);
-    //emscripten_webgl_make_context_current(ctx);
+    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx ;
+    EGLContext context = NULL;
+    EGLSurface surface = NULL;
+    EGLDisplay display = NULL;
+    EGLNativeWindowType dummyWindow = 0;
+    EGLConfig config;
 
-    glClearColor(0.9, 0.5, 0.5, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT);
+    char * target = NULL;
+    if (!PyArg_ParseTuple(argv, "|s", &target)) {
+        target = NULL;
+    }
+    EmscriptenWebGLContextAttributes attr;
+    emscripten_webgl_init_context_attributes(&attr);
+    attr.alpha = 0;
+    if (target) {
+        ctx = emscripten_webgl_create_context(target, &attr);
+        setenv("WebGL", target, 1);
+    } else {
+        ctx = emscripten_webgl_create_context("#canvas", &attr);
+    }
+
+    emscripten_webgl_make_context_current(ctx);
+
+    context = (EGLContext)emscripten_webgl_get_current_context();
+
+    display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    puts(glGetString(GL_VERSION));
+
     return Py_BuildValue("i", emscripten_webgl_get_current_context() );
 }
 
 PyStatus status;
 
-#if defined(FT)
-#include <freetype2/ft2build.h>
-#include FT_FREETYPE_H
-#endif
+#if defined(WAPY) || defined(PKPY)
+#define CPY 0
 
+__attribute__((noinline)) int
+main_(int argc, char **argv)
 
+#else
+#define CPY 1
 int
 main(int argc, char **argv)
+#endif
 {
     gettimeofday(&time_last, NULL);
 
@@ -732,15 +995,19 @@ main(int argc, char **argv)
         .wchar_argv = NULL
     };
 
-    PyImport_AppendInittab("embed", init_embed);
+    PyImport_AppendInittab("embed", PyInit_embed);
+
+    PyImport_AppendInittab("_platform", PyInit__platform);
 
 #   include "../build/gen_inittab.c"
 
 // defaults
     setenv("LC_ALL", "C.UTF-8", 0);
     setenv("TERMINFO", "/usr/share/terminfo", 0);
-    setenv("COLS","132", 0);
+    setenv("COLUMNS","132", 0);
     setenv("LINES","30", 0);
+    setenv("PYGBAG","1", 1);
+
 //    setenv("PYTHONINTMAXSTRDIGITS", "0", 0);
     setenv("LANG", "en_US.UTF-8", 0);
 
@@ -758,7 +1025,6 @@ main(int argc, char **argv)
     setenv("APPDATA", "/home/web_user", 1);
 
     setenv("PYGLET_HEADLESS", "1", 1);
-
 
     status = pymain_init(&args);
 
@@ -779,16 +1045,17 @@ main(int argc, char **argv)
     chdir("/");
 
     if (!mkdir("dev", 0700)) {
-       LOG_V("no 'dev' directory, creating one ...");
+       puts("no 'dev' directory, creating one ...");
     }
 
     if (!mkdir("dev/fd", 0700)) {
-       //LOG_V("no 'dev/fd' directory, creating one ...");
+       //puts("no 'dev/fd' directory, creating one ...");
     }
 
     if (!mkdir("tmp", 0700)) {
-       LOG_V("no 'tmp' directory, creating one ...");
+       puts("no 'tmp' directory, creating one ...");
     }
+
 
     for (int i=0;i<FD_MAX;i++)
         io_shm[i]= NULL;
@@ -806,6 +1073,9 @@ main(int argc, char **argv)
     io_shm[IO_RAW] = memset(malloc(FD_BUFFER_MAX) , 0, FD_BUFFER_MAX);
     io_shm[IO_RCON] = memset(malloc(FD_BUFFER_MAX) , 0, FD_BUFFER_MAX);
 
+
+
+
 EM_ASM({
     const FD_BUFFER_MAX = $0;
     const shm_stdin = $1;
@@ -820,7 +1090,7 @@ EM_ASM({
         const jswasmloader=document.createElement("script");
         jswasmloader.setAttribute("type","text/javascript");
         jswasmloader.setAttribute("src", script);
-        jswasmloader.setAttribute('async', aio);
+        jswasmloader.setAttribute("async", aio);
         document.getElementsByTagName("head")[0].appendChild(jswasmloader);
     };
 
@@ -856,25 +1126,35 @@ EM_ASM({
 
     }
 
-    if (!is_worker && window.BrowserFS) {
-        console.log("PyMain: found BrowserFS");
-        //if (is_worker)
-        //    jswasm_load("fshandler.js");
-
-    } else {
-        console.error("PyMain: BrowserFS not found");
+    if (!is_worker) {
+        if (typeof window === 'undefined') {
+            if (FS)
+                console.warn("PyMain: Running in Node ?");
+            else
+                console.error("PyMain: not Node");
+        } else {
+            if (window.BrowserFS) {
+                console.log("PyMain: found BrowserFS");
+                //if (is_worker)
+                //    jswasm_load("fshandler.js");
+            } else {
+                console.error("PyMain: BrowserFS not found");
+            }
+            if ($4) {
+                SYSCALLS.getStreamFromFD(0).tty = true;
+                SYSCALLS.getStreamFromFD(1).tty = true;
+                SYSCALLS.getStreamFromFD(2).tty = false;
+            }
+        }
     }
 
-    if (1) {
-        SYSCALLS.getStreamFromFD(0).tty = true;
-        SYSCALLS.getStreamFromFD(1).tty = true;
-        SYSCALLS.getStreamFromFD(2).tty = false;
-    }
 
-}, FD_BUFFER_MAX, io_shm[0], io_shm[IO_RAW], io_shm[IO_RCON]);
+}, FD_BUFFER_MAX, io_shm[0], io_shm[IO_RAW], io_shm[IO_RCON], CPY);
 
 
-    PyRun_SimpleString("import sys, os, json, builtins, shutil, time");
+    PyRun_SimpleString("import sys, os, json, builtins, time");
+    PyRun_SimpleString("sys.ps1 = ''");
+
     //PyRun_SimpleString("import hpy;import hpy.universal;print('HPy init done')");
 #if defined(FT)
     int error;
@@ -898,7 +1178,58 @@ EM_ASM({
         SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, target);
     }
 #endif
+#if ASYNCIFIED
+    clock_t start = clock()+100;
+    while (1) {
+        main_iteration();
+        clock_t current = clock();
+        if (current > start) {
+            start = current+100;
+            emscripten_sleep(1);
+        }
+    }
+#else
     emscripten_set_main_loop( (em_callback_func)main_iteration, 0, 1);
-
+#endif
+    puts("\nEnd");
     return 0;
 }
+
+#if defined(WAPY)
+int main(int argc, char **argv) {
+     #if MICROPY_PY_THREAD
+    mp_thread_init();
+    #endif
+    // We should capture stack top ASAP after start, and it should be
+    // captured guaranteedly before any other stack variables are allocated.
+    // For this, actual main (renamed main_) should not be inlined into
+    // this function. main_() itself may have other functions inlined (with
+    // their own stack variables), that's why we need this main/main_ split.
+    mp_stack_ctrl_init();
+    return main_(argc, argv);
+}
+#endif // WAPY
+
+#if defined(PKPY)
+int main(int argc, char **argv) {
+    pkpy_init()    return main_(argc, argv);
+}
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

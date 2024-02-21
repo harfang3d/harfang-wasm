@@ -6,17 +6,17 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-        SDK_VERSION: 3.1.46.2bi
+        SDK_VERSION: 3.1.54.1bi
         SYS_PYTHON: /usr/bin/python3
-        PACKAGES: emsdk hpy _ctypes pygame
-        BUILD_STATIC: emsdk _ctypes hpy
+        PACKAGES: emsdk hpy pygame
+        BUILD_STATIC: emsdk hpy
         STATIC: false
-        BUILDS: 3.11 3.12
-        CYTHON: Cython-3.0.1-py2.py3-none-any.whl
+        BUILDS: 3.11 3.12 3.13
+        CYTHON: Cython-3.0.8-py2.py3-none-any.whl
         LD_VENDOR: -sUSE_GLFW=3
 
     steps:
-    - uses: actions/checkout@v3.3.0
+    - uses: actions/checkout@v4.1.0
     - name: pygame-wasm-builder prepare
       run: |
             pwd
@@ -40,28 +40,57 @@ jobs:
     - name: build 3.11 packages
       run: |
             cd $GITHUB_WORKSPACE
-            PYBUILD=3.11 bash ./scripts/build-pkg.sh
+            PYBUILD=3.11 PACKAGES="emsdk hpy _ctypes pygame" BUILD_STATIC="emsdk _ctypes hpy"  bash ./scripts/build-pkg.sh
 
     - name: build 3.11 loader
       run: |
             cd $GITHUB_WORKSPACE
-            PYBUILD=3.11 bash ./scripts/build-loader.sh
+            PYBUILD=3.11 PACKAGES="emsdk hpy _ctypes pygame" BUILD_STATIC="emsdk _ctypes hpy" bash ./scripts/build-loader.sh
 
-#    - name: build 3.12 packages
-#      run: |
-#            cd $GITHUB_WORKSPACE
-#            PYBUILD=3.12 bash ./scripts/build-pkg.sh
-#
-#    - name: build 3.12 loader
-#      run: |
-#            cd $GITHUB_WORKSPACE
-#            PYBUILD=3.12 bash ./scripts/build-loader.sh
-#
+
+    - name: build 3.12 packages
+      run: |
+            cd $GITHUB_WORKSPACE
+            PYBUILD=3.12 bash ./scripts/build-pkg.sh
+
+    - name: build 3.12 loader
+      run: |
+            cd $GITHUB_WORKSPACE
+            PYBUILD=3.12 bash ./scripts/build-loader.sh
+
+    - name: build 3.13 packages
+      run: |
+            cd $GITHUB_WORKSPACE
+            PYBUILD=3.13 bash ./scripts/build-pkg.sh
+
+    - name: build 3.13 loader
+      run: |
+            cd $GITHUB_WORKSPACE
+            PYBUILD=3.13 bash ./scripts/build-loader.sh
+
+    - name: build PkPy loader
+      run: |
+            cd $GITHUB_WORKSPACE
+            bash ./scripts/build-pkpy.sh
 
     - name: publishing
       run: |
             cd $GITHUB_WORKSPACE
             echo "<html></html>" >  build/web/archives/index.html
+
+    - name: make wheel
+      run: |
+            cd $GITHUB_WORKSPACE
+            /opt/python-wasm-sdk/python3-wasm -m build --no-isolation .
+
+    - name: Upload sdk to Github Releases
+      if: github.event_name == 'release'
+      uses: svenstaro/upload-release-action@2.3.0
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: $GITHUB_WORKSPACE/dist/*
+        file_glob: true
+        tag: ${{ github.ref }}
 
 
     - name : "Upload to GitHub pages"

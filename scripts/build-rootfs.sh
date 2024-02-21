@@ -14,11 +14,19 @@ echo "
     * packing minimal stdlib for
         PYTHON=$HPY
         FS=$FS
+        PYTHONPYCACHEPREFIX=$PYTHONPYCACHEPREFIX
 "
 
+if echo $PYTHONPYCACHEPREFIX |grep -q $SDKROOT
+then
+    echo    "
+    * cleaning up compiled pyc if any in $PYTHONPYCACHEPREFIX/./$SDKROOT/
+"
+    rm -rf $PYTHONPYCACHEPREFIX/./$SDKROOT/
+fi
 
 
-$HPY -v <<END 2>&1 | tee log |grep py$ > $FS
+$HPY -B -v <<END 2>&1 | tee log |grep py$ > $FS
 from __future__ import annotations
 import sys
 
@@ -48,6 +56,10 @@ import multiprocessing.connection
 import asyncio.selector_events
 
 import multiprocessing
+
+# mypy
+import typing
+# ? _extensions
 
 # for dom event subscriptions and js interface
 import webbrowser
@@ -111,11 +123,19 @@ try:
 except:
     print('_curses not built')
 
+#rich
+import getpass
+import fractions
+
 #nurses_2
 import tty
 
 # cffi
 import copy
+
+# datetime
+import datetime
+import _strptime
 
 # numpy
 import secrets
@@ -123,6 +143,10 @@ import secrets
 # HPy
 import plistlib
 from pkg_resources import resource_filename
+
+# netpbm
+from mimetypes import guess_type
+from pprint import pprint
 
 # pgex
 import typing
@@ -150,7 +174,7 @@ import imghdr
 # pep722
 import pyparsing
 import packaging.requirements
-import installer
+#import installer
 
 try:
     import imp
@@ -205,7 +229,7 @@ with open("build/stdlib.list","w") as tarlist:
             print(name, file=tarlist )
         else:
             stdlp = stdlp.replace('$(arch)','emsdk')
-            #print(stdlp)
+            print(stdlp)
             tarcmd=f"tar --directory=/{stdlp}usr/lib --files-from=build/stdlib.list -cf build/stdl.tar"
             print(tarcmd)
 os.system(tarcmd)

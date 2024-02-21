@@ -5,7 +5,7 @@ export VENDOR=${VENDOR:-pygbag}
 export PACKAGES=${PACKAGES:-emsdk hpy pygame}
 
 export SDKROOT=${SDKROOT:-/opt/python-wasm-sdk}
-export SDK_VERSION=${SDK_VERSION:-3.1.46.1bi}
+export SDK_VERSION=${SDK_VERSION:-3.1.52.0bi}
 export CYTHON=${CYTHON:-Cython-3.0.1-py2.py3-none-any.whl}
 export PYBUILD=${PYBUILD:-3.11}
 export LC_ALL=C
@@ -16,7 +16,8 @@ if $CI
 then
     export PYGBAG_BUILD=0.0
 else
-    export PYGBAG_BUILD=$($SYS_PYTHON -c "print(__import__('pygbag').__version__)"|tail -n 1|cut -f1-2 -d.)
+#    export PYGBAG_BUILD=$($SYS_PYTHON -c "print(__import__('pygbag').VERSION)"|tail -n 1|cut -f1-2 -d.)
+    export PYGBAG_BUILD=0.0
 fi
 
 export DIST_DIR=$(pwd)/build/web/archives/${PYGBAG_BUILD}

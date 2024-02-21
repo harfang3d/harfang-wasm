@@ -1,22 +1,30 @@
 #!/bin/bash
 
-
-
-
 . scripts/vendoring.sh
 
 . ${CONFIG:-$SDKROOT/config}
 
+#
+
+ln -s $(pwd)/src/pygbag $(pwd)/pygbag
+
+pushd src/pygbag/support
+cp -r _xterm_parser ${SDKROOT}/prebuilt/emsdk/common/site-packages/
+#cp pygbag_*.py readline.py typing_extensions.py ${SDKROOT}/prebuilt/emsdk/common/site-packages/
+cp typing_extensions.py ${SDKROOT}/prebuilt/emsdk/common/site-packages/
+popd
+
+
+DISTRO=cpython
 
 # version independant modules
 cp -rf ${SDKROOT}/prebuilt/emsdk/common/* ${SDKROOT}/prebuilt/emsdk/${PYBUILD}/
 
 # pre populated site-packages
-export REQUIREMENTS=$(realpath ${SDKROOT}/prebuilt/emsdk/${PYBUILD}/site-packages)
+export REQUIREMENTS=${SDKROOT}/prebuilt/emsdk/${PYBUILD}/site-packages
 
 # and wasm libraries
 export DYNLOAD=${SDKROOT}/prebuilt/emsdk/${PYBUILD}/lib-dynload
-
 
 
 . $SDKROOT/emsdk/emsdk_env.sh
@@ -34,46 +42,41 @@ echo "
 " 1>&2
 
 
-
-# SDL2_image turned off : -ltiff
-
-# CF_SDL="-sUSE_SDL=2 -sUSE_ZLIB=1 -sUSE_BZIP2=1"
-
-
-# something triggers sdl2 *full* rebuild.
-# also for SDL2_mixer, ogg and vorbis
-# all pic
-
-
-# /
-# $EMPIC/libSDL2.a
-# $EMPIC/libSDL2_gfx.a
-# $EMPIC/libogg.a
-# $EMPIC/libvorbis.a
-# $EMPIC/libSDL2_mixer_ogg.a
-
 EMPIC=/opt/python-wasm-sdk/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic
 
+if echo -n $PYBUILD|grep -q 13$
+then
+    MIMALLOC="-I/opt/python-wasm-sdk/emsdk/upstream/emscripten/system/lib/mimalloc/include"
+else
+    MIMALLOC=""
+fi
 
 SUPPORT_FS=""
 
 
-mkdir -p $DIST_DIR/python${PYMAJOR}${PYMINOR}
+mkdir -p $DIST_DIR/${DISTRO}${PYMAJOR}${PYMINOR}
 
-rm $DIST_DIR/python${PYMAJOR}${PYMINOR}/main.* 2>/dev/null
+rm $DIST_DIR/${DISTRO}${PYMAJOR}${PYMINOR}/main.* 2>/dev/null
 
 # git does not keep empty dirs
 mkdir -p tests/assets tests/code
 
-ALWAYS_ASSETS=$(realpath tests/assets)
+
 ALWAYS_CODE=$(realpath tests/code)
 
+#ALWAYS_ASSETS=$(realpath tests/assets)
+ALWAYS_ASSETS=$(realpath assets/cpython)
+
+for asset in readline pyodide pygbag_app pygbag_fsm pygbag_host pygbag_ui pygbag_ux
+do
+    [ -f ${ALWAYS_ASSETS}/${asset}.py ] || ln ./src/pygbag/support/${asset}.py ${ALWAYS_ASSETS}/${asset}.py
+done
 
 
 # crosstools, aio and simulator most likely from pygbag
-if [ -d pygbag/support/cross ]
+if [ -d src/pygbag/support/cross ]
 then
-    CROSS=$(realpath pygbag/support/cross)
+    CROSS=$(realpath src/pygbag/support/cross)
     SUPPORT_FS="$SUPPORT_FS --preload-file ${CROSS}@/data/data/org.python/assets/site-packages"
 else
     echo "
@@ -103,8 +106,8 @@ fi
 
 export PATCH_FS="--preload-file $(realpath platform_wasm/platform_wasm)@/data/data/org.python/assets/site-packages/platform_wasm"
 
-
-LOPTS="-sMAIN_MODULE --bind -fno-rtti"
+# =2 will break pyodide module reuses
+LOPTS="-sMAIN_MODULE=1"
 
 # O0/g3 is much faster to build and easier to debug
 
@@ -217,9 +220,9 @@ echo CPY_CFLAGS=$CPY_CFLAGS
 
 
 
-if emcc -fPIC -std=gnu99 -D__PYDK__=1 -DNDEBUG $CPY_CFLAGS $CF_SDL $CPOPTS \
- -c -fwrapv -Wall -Werror=implicit-function-declaration -fvisibility=hidden\
- -I${PYDIR}/internal -I${PYDIR} -I./support -DPy_BUILD_CORE\
+if emcc -fPIC -std=gnu99 -D__PYDK__=1 -DNDEBUG $MIMALLOC $CPY_CFLAGS $CF_SDL $CPOPTS \
+ -c -fwrapv -Wall -Werror=implicit-function-declaration -fvisibility=hidden \
+ -I${PYDIR}/internal -I${PYDIR} -I./support -I./external/hpy/hpy/devel/include -DPy_BUILD_CORE\
  -o build/${MODE}.o support/__EMSCRIPTEN__-pymain.c
 then
     STDLIBFS="--preload-file build/stdlib-rootfs/python${PYBUILD}@/usr/lib/python${PYBUILD}"
@@ -233,36 +236,9 @@ then
 
 # TODO: test -sWEBGL2_BACKWARDS_COMPATIBILITY_EMULATION
 
+    LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
 
-
-
-# /opt/python-wasm-sdk/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic/libSDL2.a
-
-    CF_SDL="-I${SDKROOT}/devices/emsdk/usr/include/SDL2"
-    #LD_SDL2="-lSDL2_gfx -lSDL2_mixer -lSDL2_ttf"
-
-    LD_SDL2="$EMPIC/libSDL2.a"
-    LD_SDL2="$LD_SDL2 $EMPIC/libSDL2_gfx.a $EMPIC/libogg.a $EMPIC/libvorbis.a"
-    LD_SDL2="$LD_SDL2 $EMPIC/libSDL2_mixer_ogg.a $EMPIC/libSDL2_ttf.a"
-    LD_SDL2="$LD_SDL2 -lSDL2_image -lwebp -ljpeg -lpng -lharfbuzz -lfreetype"
-
-
-    #LDFLAGS="$LD_VENDOR -sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
-    LDFLAGS="$LD_SDL2"
-
-LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
-
-# -sUSE_FREETYPE -sUSE_HARFBUZZ"
-
-
-    if echo ${PYBUILD}|grep -q 10$
-    then
-        echo " - no sqlite3 for 3.10 -"
-    else
-        LDFLAGS="$LDFLAGS -lsqlite3"
-    fi
-
-
+    LDFLAGS="$LDFLAGS -lsqlite3"
 
     LDFLAGS="-L${SDKROOT}/devices/emsdk/usr/lib $LDFLAGS -lssl -lcrypto -lffi -lbz2 -lz -ldl -lm"
 
@@ -271,8 +247,12 @@ LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPO
     if  echo $PYBUILD|grep -q 3.12
     then
         LINKPYTHON="Hacl_Hash_SHA2 $LINKPYTHON"
+    else
+        if  echo $PYBUILD|grep -q 3.13
+        then
+            LINKPYTHON="Hacl_Hash_SHA2 $LINKPYTHON"
+        fi
     fi
-
 
     for lib in $LINKPYTHON
     do
@@ -296,10 +276,17 @@ LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPO
 
     " 1>&2
 
+#  -std=gnu99 -std=c++23
+# EXTRA_EXPORTED_RUNTIME_METHODS => EXPORTED_RUNTIME_METHODS after 3.1.52
+
     cat > final_link.sh <<END
 #!/bin/bash
-emcc $FINAL_OPTS $LOPTS -std=gnu99 -D__PYDK__=1 -DNDEBUG \\
+emcc \\
+ $FINAL_OPTS \\
+ $LOPTS \\
+ -D__PYDK__=1 -DNDEBUG \\
      -sTOTAL_MEMORY=256MB -sSTACK_SIZE=4MB -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \\
+    -sEXPORTED_RUNTIME_METHODS=FS \\
      $CF_SDL \\
      --use-preload-plugins \\
      $STDLIBFS \\
@@ -308,8 +295,18 @@ emcc $FINAL_OPTS $LOPTS -std=gnu99 -D__PYDK__=1 -DNDEBUG \\
      $PATCH_FS \\
      --preload-file ${DYNLOAD}@/usr/lib/python${PYBUILD}/lib-dynload \\
      --preload-file ${REQUIREMENTS}@/data/data/org.python/assets/site-packages \\
-     -o ${DIST_DIR}/python${PYMAJOR}${PYMINOR}/${MODE}.js build/${MODE}.o \\
-     $LDFLAGS
+     -o ${DIST_DIR}/${DISTRO}${PYMAJOR}${PYMINOR}/${MODE}.js build/${MODE}.o \\
+     $LDFLAGS -lembind
+
+# -lfreetype
+
+# --bind -fno-rtti
+
+# -sERROR_ON_UNDEFINED_SYMBOLS=0
+# -sGL_ENABLE_GET_PROC_ADDRESS
+
+# --bind -fno-rtti
+
 
 END
     chmod +x ./final_link.sh
@@ -336,11 +333,11 @@ END
         if $USECP
         then
             cp -R static/* ${DIST_DIR}/
-            cp pygbag/support/pythonrc.py ${DIST_DIR}/pythonrc.py
+            cp src/pygbag/support/cpythonrc.py ${DIST_DIR}/cpythonrc.py
             # for simulator
-            cp pygbag/support/pythonrc.py ${SDKROOT}/support/
+            cp src/pygbag/support/cpythonrc.py ${SDKROOT}/support/
         else
-            [ -f ${DIST_DIR}/pythonrc.py ] || ln pygbag/support/pythonrc.py ${DIST_DIR}/pythonrc.py
+            [ -f ${DIST_DIR}/cpythonrc.py ] || ln src/pygbag/support/cpythonrc.py ${DIST_DIR}/cpythonrc.py
             pushd static
             for fn in *
             do
@@ -362,7 +359,7 @@ END
 #"
 #        sed -i 's/_glfwSetWindowContentScaleCallback_sig=iii/_glfwSetWindowContentScaleCallback_sig="iii"/g' \
 #         ${DIST_DIR}/python${PYMAJOR}${PYMINOR}/${MODE}.js
-        du -hs ${DIST_DIR}/python*
+        du -hs ${DIST_DIR}/*
     else
         echo "pymain+loader linking failed"
         exit 178
@@ -371,5 +368,23 @@ else
     echo "pymain compilation failed"
     exit 182
 fi
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

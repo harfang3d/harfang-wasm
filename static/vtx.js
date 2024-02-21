@@ -2,6 +2,8 @@
 
 var readline = { last_cx : -1 , index : 0, history : ["help()"] }
 
+// two modes based on RAW_MODE: default readline emulation or python.rawstdin
+
 readline.complete = function (line) {
     if ( readline.history[ readline.history.length -1 ] != line )
         readline.history.push(line);
@@ -9,12 +11,6 @@ readline.complete = function (line) {
     python.readline(line + "\n")
 
 }
-
-function rawstdin(line) {
-    //console.log("RAW:", line )
-    python.rawstdin(line)
-}
-
 
 if (!window.Terminal) {
     var xterm_cdn
@@ -45,29 +41,50 @@ if (!window.Terminal) {
 
 
 export class WasmTerminal {
-    constructor(hostid, cols, rows, addons_list) {
+    constructor(hostid, cols, rows, fontsize, is_fbdev, addons_list) {
         this.input = ''
         this.resolveInput = null
         this.activeInput = true
         this.inputStartCursor = null
 
         this.nodup = 1
+        var theme = {
+            background: '#1a1c1f'
+        }
+
+
+        var transparency = false
+        var sback = 1000
+
+        if (is_fbdev) {
+            theme = {
+                foreground: '#ffffff',
+                background: 'rgba(0, 0, 0, 0)'
+            }
+            sback = 0
+            transparency = true
+        }
 
         this.xterm = new Terminal(
             {
-//                allowTransparency: true,
+//              rendererType : "dom",
+                rendererType : "webgl",
+                experimentalCharAtlas : "webgl",
+                theme: theme,
+                allowTransparency: transparency,
                 allowProposedApi : true ,   // xterm 0.5 + sixel
-                scrollback: 10000,
-                fontSize: 14,
-                theme: { background: '#1a1c1f' },
-                cols: (cols || 132), rows: (rows || 30)
+                scrollback: sback,
+                fontFamily: 'Courier-new, courier, monospace',
+                fontSize: (fontsize || 12),
+                cols: (cols || 132),
+                rows: (rows || 32)
             }
         );
 
         if (typeof(Worker) !== "undefined") {
 
             for (const addon of (addons_list||[]) ) {
-                console.warn(hostid,cols,rows, addon)
+                console.warn(hostid, cols, rows, addon)
                 const imageAddon = new ImageAddon.ImageAddon(addon.url , addon);
                 this.xterm.loadAddon(imageAddon);
                 this.sixel = function write(data) {
@@ -75,15 +92,12 @@ export class WasmTerminal {
                 }
             }
 
-
         } else {
             console.warn("No worker support, not loading xterm addons")
             this.sixel = function ni() {
                 console.warn("SIXEL N/I")
             }
         }
-
-
 
         this.xterm.open(document.getElementById(hostid))
 
@@ -109,14 +123,18 @@ export class WasmTerminal {
 
     handleTermData = (data) => {
 
+
+
+// TODO: check mouse Y pos for raw mode in debug mode
+        if (window.RAW_MODE) {
+            python.rawstdin(data)
+            return
+        }
+
         const ord = data.charCodeAt(0);
         let ofs;
 
         const cx = this.xterm.buffer.active.cursorX
-
-// TODO: check mouse pos
-        if (window.RAW_MODE)
-            rawstdin(data)
 
         // TODO: Handle ANSI escape sequences
         if (ord === 0x1b) {
@@ -126,9 +144,20 @@ export class WasmTerminal {
                 case 0x5b:
 
                     const cursor = readline.history.length  + readline.index
-                    var histo = ">>> "
+                    var histo = ">h> "
 
                     switch ( data.charCodeAt(2) ) {
+                        // "?"
+                        case 63:
+                            const c4 = data.charCodeAt(4)
+                            const c5 = data.charCodeAt(5)
+                            if ((c4==54) && (c5==99)) {
+                            // Primary Device Attribute of Sixel support : 4
+                            // "?6c" https://github.com/odknt/st/issues/1
+                                console.log("query")
+
+                            }
+
 
                         case 65:
                             //console.log("VT UP")
@@ -143,7 +172,7 @@ export class WasmTerminal {
 
                             if ( cursor >0 ) {
                                 readline.index--
-                                histo = ">>> " +readline.history[cursor-1]
+                                histo = ">h> " +readline.history[cursor-1]
                                 //console.log(__FILE__," histo-up  :", readline.index, cursor, histo)
 
                                 this.ESC("[132D","[2K")
@@ -186,8 +215,7 @@ export class WasmTerminal {
                             break;
 
                         case 60:
-                            if (!window.RAW_MODE)
-                                rawstdin(data)
+                              //  python.rawstdin(data)
                             break;
 
                         default:

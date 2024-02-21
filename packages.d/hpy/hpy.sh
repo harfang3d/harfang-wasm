@@ -19,8 +19,8 @@ echo "
 
 
 
-mkdir -p src
-pushd $(pwd)/src
+mkdir -p external
+pushd $(pwd)/external
 
 if [ -d hpy ]
 then
@@ -30,8 +30,8 @@ then
 else
     git clone --no-tags --depth 1 --single-branch --branch master https://github.com/hpyproject/hpy
 
-    wget https://github.com/hpyproject/hpy/archive/refs/tags/0.9.0rc2.tar.gz
-    tar xvfz 0.9.0rc2.tar.gz
+    #wget https://github.com/hpyproject/hpy/archive/refs/tags/0.9.0rc2.tar.gz
+    #tar xvfz 0.9.0rc2.tar.gz
 
     pushd $(pwd)/hpy
     # git submodule update --init --recursive
@@ -55,7 +55,7 @@ popd
 
 #mkdir -p build/hpy
 
-pushd src/hpy
+pushd external/hpy
 
 # build for host simulator
 ${HPY} setup.py install

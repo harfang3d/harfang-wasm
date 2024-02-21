@@ -13,6 +13,8 @@ window.BrowserFS.Buffer = BFSRequire('buffer')
 var bfs2 = false
 
 async function import_browserfs() {
+    if (window.BrowserFS)
+        return
     console.warn("late import", config.cdn+"browserfs.min.js" )
     var script = document.createElement("script")
     script.src = vm.config.cdn + "browserfs.min.js"
@@ -48,21 +50,25 @@ const FETCH_FLAGS = {
 
 
 window.get_terminal_cols = function () {
-    var cdefault = vm.config.cols || 132
-    const cols = (window.terminal && terminal.dataset.cols) || cdefault
+    var cdefault = 132
+    if (window.terminal)
+        if (vm && vm.config.columns)
+            cdefault = Number(vm.config.columns || cdefault)
+    const cols = (window.terminal && terminal.dataset.columns) || cdefault
     return Number(cols)
 }
 
 window.get_terminal_console = function () {
     var cdefault = 0
     if (window.terminal)
-        if (vm && vm.config.debug)
-            cdefault = 10
+        if (vm && vm.config.console)
+            cdefault = Number( vm.config.console || cdefault)
     return Number( (window.terminal && terminal.dataset.console) || cdefault )
 }
 
 window.get_terminal_lines = function () {
-    return Number( (window.terminal && terminal.dataset.lines) || vm.config.lines) + get_terminal_console()
+    return Number( (window.terminal && terminal.dataset.lines) || vm.config.lines)
+   // + get_terminal_console() for the phy size
 }
 
 
@@ -88,20 +94,31 @@ function reverse(s){
     return s.split("").reverse().join("");
 }
 
+
 // please comment here if you find a bug
 // https://stackoverflow.com/questions/5202085/javascript-equivalent-of-pythons-rsplit
 
 String.prototype.rsplit = function(sep, maxsplit) {
     var result = []
-    if ( (sep === undefined) ) {
+    var src = this
+    var nullsep = false
+
+    if ( (sep === undefined) || (sep === null) || (!sep) ) {
         sep = " "
-        maxsplit = 0
+        nullsep = true
+        src = src.replaceAll(sep+sep,sep)
+        src = src.replaceAll(sep+sep,sep)
     }
 
-    if (maxsplit === 0  )
-        return [this]
+    if (nullsep && !src)
+        return []
 
-    var data = this.split(sep)
+    if (maxsplit === 0  )
+        return [src]
+
+    maxsplit = maxsplit || -1
+
+    var data = src.split(sep)
 
 
     if (!maxsplit || (maxsplit<0) || (data.length==maxsplit+1) )
@@ -120,7 +137,6 @@ String.prototype.rsplit = function(sep, maxsplit) {
     }
     return [this]
 }
-
 
 function jsimport(url, sync) {
     const jsloader=document.createElement('script')
@@ -284,30 +300,21 @@ function is_iframe() {
     }
 }
 
+
+// https://emscripten.org/docs/api_reference/Filesystem-API.html
+
 function prerun(VM) {
     console.warn("VM.prerun")
-
-    VM.FS = FS
-
-/*
-    if (window.BrowserFS) {
-        VM.BFS = new BrowserFS.EmscriptenFS()
-        VM.BFS.Buffer = BrowserFS.BFSRequire('buffer').Buffer
-    } else {
-        console.error("VM.prerun","BrowserFS not found")
-    }
-*/
+    // https://github.com/emscripten-core/emscripten/issues/4515
+    // VM.FS = FS
     const sixel_prefix = String.fromCharCode(27)+"Pq"
-
 
     var buffer_stdout = ""
     var buffer_stderr = ""
     var flushed_stdout = false
     var flushed_stderr = false
 
-
     const text_codec = new TextDecoder()
-
 
     function b_utf8(s) {
         var ary = []
@@ -317,11 +324,9 @@ function prerun(VM) {
         return text_codec.decode(  new Uint8Array(ary) )
     }
 
-
     function stdin() {
         return null
     }
-
 
     function stdout(code) {
 
@@ -361,7 +366,6 @@ function prerun(VM) {
             buffer_stdout += String.fromCharCode(code);
     }
 
-
     function stderr(code) {
         var flush = (code == 4)
 
@@ -400,6 +404,27 @@ function prerun(VM) {
     VM.FS.init(stdin, stdout, stderr);
 
 }
+
+
+async function postrun(VM) {
+    console.warn("VM.postrun Begin")
+    window.VM = VM
+    window.python = VM
+    window.py = new bridge(VM)
+
+    var pyrc_url = vm.config.cdn + VM.script.interpreter + "rc.py"
+
+    await fetch(pyrc_url, {})
+        .then( response => checkStatus(response) && response.arrayBuffer() )
+        .then( buffer => run_pyrc(new Uint8Array(buffer)) )
+        .catch(x => {
+            console.error("VM.postrun: error:",x)
+            console.log("VM.postrun:", pyrc_url)
+        })
+
+    console.warn("VM.postrun End")
+}
+
 
 
 const vm = {
@@ -475,7 +500,7 @@ const vm = {
 
         locateFile : function(path, prefix) {
             if (path == "main.data") {
-                const url = (config.cdn || "" )+`python${config.pydigits}/${path}`
+                const url = (config.cdn || "" )+`${vm.script.interpreter}${config.pydigits}/${path}`
                 console.log(__FILE__,"locateData: "+path+' '+prefix, "->", url);
                 return url;
             } else {
@@ -513,22 +538,16 @@ const vm = {
             }
         },
 
-
+        websocket : { "url" : "wss://" },
         preRun : [ prerun ],
-        postRun : [ function (VM) {
-            VM["websocket"]["url"] = "wss://"
-            window.python = VM
-            window.py = new bridge(VM)
-            setTimeout(custom_postrun, 10)
-
-        } ]
+        postRun : [ postrun ]
 }
 
 
 async function run_pyrc(content) {
-    const pyrc_file = "/data/data/org.python/assets/pythonrc.py"
-    const main_file = "/data/data/org.python/assets/main.py"
-
+    const base = "/data/data/org.python/assets/"
+    const pyrc_file = base + "pythonrc.py"
+    const main_file = base + "__main__.py"
     vm.FS.writeFile(pyrc_file, content )
 
 // embedded canvas
@@ -549,23 +568,61 @@ async function run_pyrc(content) {
     }
 
     python.PyRun_SimpleString(`#!site
-PyConfig = json.loads("""${JSON.stringify(python.PyConfig)}""")
-verbose = PyConfig.get('quiet', False)
-import os, sys, json
-pfx=PyConfig['prefix']
-if os.path.isdir(pfx):
-    sys.path.append(pfx)
-    os.chdir(pfx)
+
 __pythonrc__ = "${pyrc_file}"
-if os.path.isfile(__pythonrc__):
-    exec(open(__pythonrc__).read(), globals(), globals())
-    import asyncio
-    asyncio.run(import_site("${main_file}"))
-else:
-    print(f"510: invalid {__pythonrc__=}")
-del pfx, verbose
-#
+
+try:
+    __PKPY__
+except:
+    __PKPY__ = False
+
+if __PKPY__:
+    with open(__pythonrc__, "r") as pythonrc:
+        exec(pythonrc.read().replace(chr(92)+chr(10),""), globals())
+
+import os
+def os_path_is_dir(path):
+    try:
+        os.listdir(str(path))
+        return True
+    except:
+        return False
+
+def os_path_is_file(path):
+    parent, file = str(path).rsplit("/",1)
+    try:
+        return file in os.listdir(parent)
+    except:
+        return False
+
+import sys, json
+PyConfig = json.loads("""${JSON.stringify(python.PyConfig)}""")
+pfx=PyConfig["prefix"]
+
+if not __PKPY__:
+
+    if os_path_is_dir(pfx):
+        sys.path.append(pfx)
+        os.chdir(pfx)
+
+    del pfx
+
+    try:
+        if os_path_is_file(__pythonrc__):
+            exec(open(__pythonrc__).read(), globals(), globals())
+        else:
+            raise Error("File not found")
+    except Exception as e:
+        print(f"616: invalid rcfile {__pythonrc__}")
+        sys.print_exception(e)
+
+    try:
+        import asyncio
+        asyncio.run(import_site("${main_file}"))
+    except ImportError:
+        pass
 `)
+
 }
 
 
@@ -575,19 +632,6 @@ function store_file(url, local) {
         .then( buffer => vm.FS.writeFile(local, new Uint8Array(buffer)) )
         .catch(x => console.error(x))
 }
-async function custom_postrun() {
-    console.warn("VM.postrun Begin")
-    const pyrc_url = vm.config.cdn + "pythonrc.py"
-    var content = 0
-
-    fetch(pyrc_url, {})
-        .then( response => checkStatus(response) && response.arrayBuffer() )
-        .then( buffer => run_pyrc(new Uint8Array(buffer)) )
-        .catch(x => console.error(x))
-
-    console.warn("VM.postrun End")
-}
-
 
 // ===================== DOM features ====================
 
@@ -699,14 +743,14 @@ console.warn("TODO: user defined canvas")
             if (vm.config.debug)
                 console.warn("too tall : have",max_height,"want",want_h)
             want_h = max_height
-            want_w = want_h * ar
+            want_w = Math.trunc(want_h * ar)
         }
 
         if (want_w > max_width) {
             if (vm.config.debug)
                 console.warn("too wide : have",max_width,"want",want_w)
             want_w = max_width
-            want_h = want_h / ar
+            want_h = Math.trunc(want_h / ar)
         }
 
 
@@ -783,13 +827,13 @@ console.warn("TODO: user defined canvas")
         if (want_h > max_height) {
             //console.warn ("Too much H")
             want_h = max_height
-            want_w = want_h * ar
+            want_w = Math.trunc(want_h * ar)
         }
 
         if (want_w > max_width) {
             //console.warn("Too much W")
             want_w = max_width
-            want_h = want_h / ar
+            want_h = Math.trunc(want_h / ar)
         }
 
         // restore phy size
@@ -864,57 +908,71 @@ console.log(" @@@@@@@@@@@@@@@@@@@@@@ 3D CANVAS @@@@@@@@@@@@@@@@@@@@@@")
 
 // file transfer (upload)
 
+
+
+
+function readFileAsArrayBuffer(file, success, error) {
+    const fr = new FileReader();
+    fr.addEventListener('error', error, false);
+    if (fr.readAsBinaryString) {
+        fr.addEventListener('load', function () {
+            var string = this.resultString != null ? this.resultString : this.result;
+            var result = new Uint8Array(string.length);
+            for (var i = 0; i < string.length; i++) {
+                result[i] = string.charCodeAt(i);
+            }
+            success(result.buffer);
+        }, false);
+        return fr.readAsBinaryString(file);
+    } else {
+        fr.addEventListener('load', function () {
+            success(this.result);
+        }, false);
+        return fr.readAsArrayBuffer(file);
+    }
+}
+
+function transfer_uploads(files, use_names){
+    //global uploaded_file_count = 0
+    function transfer_file(frec) {
+        return (data) => {
+            let pydata = JSON.stringify(frec)
+            console.warn("UPLOAD", pydata, frec.text );
+            python.FS.writeFile(frec.text, new Int8Array(data) )
+            queue_event("upload", pydata )
+        }
+    }
+    for (var i=0;i<files.length;i++) {
+        uploaded_file_count++;
+        let file = files[i]
+        var datapath
+        if (use_names){
+            datapath = `/tmp/${file.name}`
+            //console.log(file.name, file.type, "to", datapath)
+        } else {
+            datapath = `/tmp/upload-${uploaded_file_count}`
+        }
+
+        let frec = {}
+            frec["name"] = file.name
+            frec["size"] = file.size
+            frec["mimetype"] = file.type
+            frec["text"] = datapath
+
+        readFileAsArrayBuffer(file, transfer_file(frec), console.error )
+    }
+
+}
+window.transfer_uploads = transfer_uploads
+window.uploaded_file_count = 0
+
 async function feat_fs(debug_hidden) {
-    var uploaded_file_count = 0
 
     if (!window.BrowserFS) {
         await import_browserfs()
     }
 
-    function readFileAsArrayBuffer(file, success, error) {
-        var fr = new FileReader();
-        fr.addEventListener('error', error, false);
-        if (fr.readAsBinaryString) {
-            fr.addEventListener('load', function () {
-                var string = this.resultString != null ? this.resultString : this.result;
-                var result = new Uint8Array(string.length);
-                for (var i = 0; i < string.length; i++) {
-                    result[i] = string.charCodeAt(i);
-                }
-                success(result.buffer);
-            }, false);
-            return fr.readAsBinaryString(file);
-        } else {
-            fr.addEventListener('load', function () {
-                success(this.result);
-            }, false);
-            return fr.readAsArrayBuffer(file);
-        }
-    }
 
-    async function transfer_uploads(){
-        //let reader = new FileReader();
-
-        for (var i=0;i<dlg_multifile.files.length;i++) {
-            let file = dlg_multifile.files[i]
-            const datapath = `/tmp/upload-${uploaded_file_count}`
-            var frec = {}
-                frec["name"] = file.name
-                frec["size"] = file.size
-                frec["mimetype"] = file.type
-                frec["text"] = datapath
-
-            function file_done(data) {
-                const pydata = JSON.stringify(frec)
-                console.warn("UPLOAD", pydata );
-                python.FS.writeFile(datapath, new Int8Array(data) )
-                queue_event("upload", pydata )
-            }
-            readFileAsArrayBuffer(file, file_done, console.error )
-            uploaded_file_count++;
-        }
-
-    }
     var dlg_multifile = document.getElementById("dlg_multifile")
     if (!dlg_multifile) {
         dlg_multifile = document.createElement('input')
@@ -924,7 +982,12 @@ async function feat_fs(debug_hidden) {
         dlg_multifile.hidden = debug_hidden
         document.body.appendChild(dlg_multifile)
     }
-    dlg_multifile.addEventListener("change", transfer_uploads );
+
+    function dlg_multifile_transfer_uploads(){
+        return transfer_uploads(dlg_multifile.files, false)
+    }
+
+    dlg_multifile.addEventListener("change", dlg_multifile_transfer_uploads );
 
 }
 
@@ -973,11 +1036,27 @@ async function feat_vtx(debug_hidden) {
         document.body.appendChild(terminal)
     }
 
+    const cols = get_terminal_cols()
+    const cons = get_terminal_console()
     const { WasmTerminal } = await import("./vtx.js")
+    const lines = get_terminal_lines() + cons  // including virtual get_terminal_console()
+    const py = window.document.body.clientHeight
+    var fntsize = Math.floor(py/lines) - 1
 
-    vm.vt = new WasmTerminal("terminal", get_terminal_cols(), get_terminal_lines(), [
+    if (lines<=33)
+        fntsize = fntsize - 5
+
+    console.warn("fnt:",window.document.body.clientHeight ,"/", lines,"=", fntsize, " Cols:", cols, "Cons:", cons)
+    vm.vt = new WasmTerminal(
+        "terminal",
+        cols,
+        lines,
+        fntsize,
+        config.fbdev,
+        [
             { url : (config.cdn || "./") + "xtermjsixel/xterm-addon-image-worker.js", sixelSupport:true}
-    ] )
+        ]
+    )
 }
 
 
@@ -1013,6 +1092,9 @@ function feat_stdout() {
 
 
 function focus_handler(ev) {
+    if (!window.canvas)
+        return
+
     if (ev.type == "click") {
         canvas.removeEventListener("click", MM.focus_handler)
         canvas.focus()
@@ -1020,18 +1102,21 @@ function focus_handler(ev) {
     }
 
     if (ev.type == "mouseenter") {
-        canvas.focus()
-        console.log("canvas focus set")
+        console.log("focus set")
         if (MM.focus_lost && MM.current_trackid) {
             console.warn("resuming music queue")
             MM[MM.current_trackid].media.play()
         }
-
+        if (!window.canvas)
+            return
+        canvas.focus()
         canvas.removeEventListener("mouseenter", MM.focus_handler)
         return
     }
 
     if (ev.type == "focus") {
+        if (!window.canvas)
+            return
         queue_event("focus", ev )
         console.log("focus set")
         canvas.focus()
@@ -1040,6 +1125,8 @@ function focus_handler(ev) {
 
     // for autofocus
     if (ev.type == "blur") {
+        if (!window.canvas)
+            return
         // remove initial focuser that may still be there
         try {
             canvas.removeEventListener("click", MM.focus_handler)
@@ -1082,17 +1169,25 @@ function feat_snd() {
     // to set user media engagement status and possibly make it blocking
     MM.UME = !vm.config.ume_block
     MM.is_safari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    if (!MM.UME && !MM.is_safari)
-        MM_play( {auto:1, test:1, media: new Audio(config.cdn+"empty.ogg")} , 1)
 
-    if (MM.is_safari) {
-        MM.is_safari = function unlock_ume() {
-                console.warn("safari ume unlocking")
+    if (!MM.is_safari)
+        MM.is_safari = navigator.userAgent.search("iPhone")>=0;
+
+    if (!MM.UME) {
+        if (MM.is_safari) {
+            console.warn("safari ume unlocking")
+            MM.is_safari = function unlock_ume() {
                 MM.UME = 1
                 window.removeEventListener("click", MM.is_safari)
                 MM.is_safari = 1
             }
-        window.addEventListener("click", MM.is_safari)
+            window.addEventListener("click", MM.is_safari)
+        } else {
+            console.warn("Auto ume unlocker safari==", MM.is_safari)
+            MM_play( {auto:1, test:1, media: new Audio(config.cdn+"empty.ogg")} , 1)
+        }
+    } else {
+        console.warn("NO ume unlocker, safari ==", MM.is_safari)
     }
 }
 
@@ -1202,7 +1297,7 @@ async function media_prepare(trackid) {
             BrowserFS.ZipFS = BrowserFS.FileSystem.ZipFS
 
             function apk_cb(e, apkfs){
-                console.log(__FILE__, "930 mounting", hint, "onto", track.mount.point)
+                console.log(__FILE__, "1225: mounting", hint, "onto", track.mount.point)
 
                 BrowserFS.InMemory.Create(
                     function(e, memfs) {
@@ -1211,8 +1306,9 @@ async function media_prepare(trackid) {
                                 BrowserFS.MountableFileSystem.Create({
                                     '/' : ovfs
                                     }, async function(e, mfs) {
-                                        await BrowserFS.initialize(mfs);
-                                        await vm.FS.mount(vm.BFS, {root: track.mount.path}, track.mount.point);
+                                        await BrowserFS.initialize(mfs)
+                                        await vm.FS.mount(vm.BFS, {root: track.mount.path}, track.mount.point)
+                                        console.log("1236: mount complete")
                                         setTimeout(()=>{track.ready=true}, 0)
                                     })
                             }
@@ -1244,10 +1340,8 @@ async function media_prepare(trackid) {
             });
 
             vm.FS.mount(vm.BFS, { root: track.mount.path, }, track.mount.point);
-
+            setTimeout(()=>{track.ready=true}, 0)
         } // bfs2
-
-        setTimeout(()=>{track.ready=true}, 0)
 
     } // track type mount
 }
@@ -1267,7 +1361,7 @@ function MM_play(track, loops) {
             console.error(`** MEDIA USER ACTION REQUIRED [${track.test}] **`)
             if (track.test && track.test>0) {
                 track.test += 1
-                setTimeout(MM_play, 1000, track, loops)
+                setTimeout(MM_play, 2000, track, loops)
             }
 
         });
@@ -2181,10 +2275,11 @@ async function onload() {
 // -->
     }
 
+// TODO: error alert if 404 / timeout
     console.warn("Loading python interpreter from", config.executable)
     jsimport(config.executable)
-
 }
+
 
 function auto_conf(cfg) {
     var url = cfg.url
@@ -2206,16 +2301,12 @@ function auto_conf(cfg) {
     elems = url.rsplit('#',1)
     url = elems.shift()
 
-
-
     elems = url.rsplit('?',1)
     url = elems.shift()
 
-console.warn("TODO: merge/replace location options over script options")
-
     if (url.endsWith(module_name)) {
         url = url + (window.location.search || "?") + ( window.location.hash || "#" )
-        console.log("Location taking precedence over script", old_url ,'=>', url )
+        console.log("Location of",module_name,"overrides script", old_url ,'=>', url )
     }
 
     elems = url.rsplit('#',1)
@@ -2243,20 +2334,42 @@ console.warn("TODO: merge/replace location options over script options")
         console.warn("1601: no inlined code found")
     }
 
-    // resolve python executable
+    // resolve python executable cmdline first
+    // TODO: built script override when debug mode (-X dev).
+    // actual: no pygbag override.
 
-    if (vm.cpy_argv.length) {
-        var orig_argv_py
-        if (vm.cpy_argv[0].search('cpython3')>=0) {
+    const default_version = "3.11"
+    var pystr = "python" + default_version
+
+    if (vm.cpy_argv.length && (vm.cpy_argv[0].search('py')>=0)) {
+        pystr = vm.cpy_argv[0]
+    } else {
+        if (cfg.python && (cfg.python.search('py')>=0)) {
+            pystr = cfg.python
+        }
+        // fallback to cpython
+    }
+
+
+    if (pystr.search('cpython3')>=0) {
+        vm.script.interpreter = "cpython"
+        config.PYBUILD = pystr.substr(7) || default_version
+    } else {
+        if (pystr.search('python3')>=0) {
             vm.script.interpreter = "cpython"
-            config.PYBUILD = vm.cpy_argv[0].substr(7) || "3.11"
+            config.PYBUILD = pystr.substr(6) || default_version
         } else {
-            if (vm.cpy_argv[0].search('wapy')>=0) {
-// TODO wapy is not versionned
-                vm.script.interpreter = "wapy"
+            if (pystr.search('pkpy')>=0) {
+                vm.script.interpreter = "pkpy"
+                config.PYBUILD = pystr.substr(4) || "1.4"
             } else {
-                vm.script.interpreter = config.python || "cpython"
-                config.PYBUILD = vm.cpy_argv[0].substr(7) || "3.11"
+                if (pystr.search('wapy')>=0) {
+                    vm.script.interpreter = "wapy"
+                    config.PYBUILD = pystr.substr(4) || "3.4"
+                } else {
+                    vm.script.interpreter = config.python || "cpython"
+                    config.PYBUILD = pystr.substr(7) || default_version
+                }
             }
         }
     }
@@ -2268,8 +2381,7 @@ console.warn("TODO: merge/replace location options over script options")
 
     config.cdn     = config.cdn || url.split(module_name, 1)[0]  //??=
     config.pydigits =  config.pydigits || config.PYBUILD.replace(".","") //??=
-    config.executable = config.executable || `${config.cdn}python${config.pydigits}/main.js` //??=
-
+    config.executable = config.executable || `${config.cdn}${vm.script.interpreter}${config.pydigits}/main.js` //??=
 
     // resolve arguments
 
@@ -2282,8 +2394,10 @@ console.warn("TODO: merge/replace location options over script options")
 //FIXME: should debug force -i or just display vt ?
 config.interactive = config.interactive || (location.search.search("-i")>=0) //??=
 
-    config.cols = cfg.cols || 132
+    config.columns = cfg.columns || 132
     config.lines = cfg.lines || 32
+    config.console = cfg.console || 10
+    config.fbdev = cfg.os.search("fbdev")>=0
 
     config.gui_debug = config.gui_debug ||  2  //??=
 
@@ -2345,7 +2459,7 @@ config.interactive = config.interactive || (location.search.search("-i")>=0) //?
             "malloc_stats" : 0 ,
             "platlibdir" : "lib",
             "prefix" : "/data/data/org.python/assets/site-packages",
-            "ps1" : ">>> ",
+            "ps1" : ">J> ",
             "ps2" : "... "
         }`)
 
@@ -2361,10 +2475,10 @@ config.interactive = config.interactive || (location.search.search("-i")>=0) //?
     console.log('docurl=', document.location.href)
     console.log('srcurl=', url)
     if (!cfg.module) {
-        console.log('data-os=', config.os)
-        console.log('data-python=', config.python)
-        console.log('script: id=', config.id)
-        console.log('code : ' , code.length, ` as ${config.id}.py`)
+        console.log('data-os=', cfg.os)
+        console.log('data-python=', cfg.python)
+        console.log('script: id=', cfg.id)
+        console.log('code : ' , code.length, ` as ${cfg.id}.py`)
     }
     vm.config = config
 }
@@ -2375,7 +2489,6 @@ function auto_start(cfg) {
     if (cfg) {
         console.error("not using python script tags")
         cfg.os = "gui"
-        //config.id = "__main__"
         cfg.module = true
         auto_conf(cfg)
         vm.script.blocks = [ "print(' - Pygbag runtime -')" ]
@@ -2386,27 +2499,23 @@ function auto_start(cfg) {
                 cfg = {
                     module : false,
                     python : script.dataset.python,
-                    cols : script.dataset.cols,
+                    cols : script.dataset.columns,
                     lines : script.dataset.lines,
+                    console : script.dataset.console,
                     url : script.src,
-                    os : script.dataset.os,
+                    os : script.dataset.os || "gui",
                     text : code,
                     id : script.id,
                     autorun : ""
                 }
 
-                window.addEventListener("load", onload )
                 auto_conf(cfg)
 
-                if (vm.config.autorun)
-                    code = code + `
-    if sys.platform in ('emscripten','wasi'):
-        embed.run()
-`
-
+                // only one script tag for now
                 vm.script.blocks = [ code ]
 
-                // only one script tag for now
+                window.addEventListener("load", onload )
+
                 break
             } else {
                 console.log("script?", script.type, script.id, script.src, script.text )

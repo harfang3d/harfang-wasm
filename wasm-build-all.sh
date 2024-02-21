@@ -44,13 +44,17 @@ do
     ./scripts/build-loader.sh
 done
 
+if echo "$@"|grep PKPY
+then
+    ./scripts/build-pkpy.sh
+fi
 
 
 
-
-
-
-
+if echo "$@"|grep WAPY
+then
+    ./scripts/build-wapy2.sh
+fi
 
 
 
