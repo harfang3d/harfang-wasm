@@ -9,7 +9,7 @@ index df2efc6..bbec58a 100644
 -#   error Unsupported platform!
 +#   warning Unsupported platform!
  #endif
- 
+
  #if (0                        \
 diff --git a/src/cmft/image.cpp b/src/cmft/image.cpp
 index 1f1160d..7633f0d 100644
@@ -23,8 +23,8 @@ index 1f1160d..7633f0d 100644
 +        /* for glibc system that support LFS */
 +    #else
 +        /* others */
-+    #   define fseeko64 fseeko
-+    #   define ftello64 ftello
++    #   define fseeko64 fseek
++    #   define ftello64 ftell
      #endif // CMFT_
- 
+
      int64_t rwSeekFile(Rw* _rw, int64_t _offset = 0, Whence::Enum _whence = Whence::Current)

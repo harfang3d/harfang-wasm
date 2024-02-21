@@ -5,13 +5,13 @@ index 88def0e..c851502 100644
 @@ -9,6 +9,14 @@
  #include "filepath.h"
  #include "readerwriter.h"
- 
+
 +#if defined(_LARGEFILE64_SOURCE)
 +    /* for glibc system that support LFS */
 +#else
 +    /* others */
-+#   define fseeko64 fseeko
-+#   define ftello64 ftello
++#   define fseeko64 fseek
++#   define ftello64 ftell
 +#endif
 +
  namespace bx

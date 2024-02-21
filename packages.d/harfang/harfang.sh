@@ -19,8 +19,8 @@ echo "
 
 
 
-mkdir -p src
-pushd $(pwd)/src
+mkdir -p external
+pushd $(pwd)/external
     if [ -d harfang ]
     then
         pushd $(pwd)/harfang
