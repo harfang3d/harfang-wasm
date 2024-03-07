@@ -17,9 +17,9 @@ import json
 
 
 PYCONFIG_PKG_INDEXES_DEV = ["http://localhost:<port>/archives/repo/"]
-PYCONFIG_PKG_INDEXES = ["https://pygame-web.github.io/archives/repo/"]
+# normal index or PYGPY env is handled after env conversion around line 255
 
-# the sim does not preload assets and cannot access currentline
+# the sim does not ospreload assets and cannot access currentline
 # unless using https://github.com/pmp-p/aioprompt/blob/master/aioprompt/__init__.py
 # or a thread
 
@@ -252,6 +252,10 @@ else:
     os.environ["APPDATA"] = home
     del home
 
+# now in pep0723
+#PYCONFIG_PKG_INDEXES = [
+#    os.environ.get('PYGPY', "https://pygame-web.github.io/archives/repo/"),
+#]
 
 PyConfig["imports_ready"] = False
 PyConfig["pygbag"] = 0
@@ -682,8 +686,11 @@ ________________________
             env = Path(sconf["purelib"])
 
             if not len(Config.repos):
-                if not len(Config.PKG_INDEXES):
-                    Config.PKG_INDEXES = PyConfig.pkg_indexes
+                await aio.pep0723.async_repos()
+
+    # TODO switch to METADATA:Requires-Dist
+    #   see https://github.com/pygame-web/pygbag/issues/156
+
                 for cdn in Config.PKG_INDEXES:
                     async with platform.fopen(Path(cdn) / Config.REPO_DATA) as source:
                         Config.repos.append(json.loads(source.read()))
@@ -960,7 +967,6 @@ import aio.filelike
 platform.fopen = aio.filelike.fopen
 platform.sopen = aio.filelike.sopen
 
-
 if not aio.cross.simulator:
 
     def fix_url(maybe_url):
@@ -1067,9 +1073,10 @@ if not aio.cross.simulator:
                 PyConfig.pkg_indexes.append(redirect)
 
             print("807: DEV MODE ON", PyConfig.pkg_indexes)
-        else:
-            # address cdn
-            PyConfig.pkg_indexes = PYCONFIG_PKG_INDEXES
+# now in pep0723
+#        else:
+#            # address cdn
+#            PyConfig.pkg_indexes = PYCONFIG_PKG_INDEXES
 
         from platform import window, document, ffi
 
@@ -1130,8 +1137,6 @@ if not aio.cross.simulator:
 
         from pathlib import Path
 
-        # repodata = "repodata.json"
-
         def eval(self, source):
             for count, line in enumerate(source.split("\n")):
                 if not count:
@@ -1143,7 +1148,7 @@ if not aio.cross.simulator:
             if count:
                 self.line = None
                 self.buffer.insert(0, "#")
-            # self.buffer.append("")
+
             DBG(f"1039: {count} lines queued for async eval")
 
         @classmethod
@@ -1208,13 +1213,13 @@ if not aio.cross.simulator:
             if not len(aio.pep0723.Config.pkg_repolist):
                 print(
                     """
-1170: pep0723 REPOSITORY MISSING
+1208: pep0723 REPOSITORY MISSING
 """
                 )
             else:
                 DBG(
                     f"""
-1175: list_imports {len(code)=} {file=} {hint=}")
+1214: list_imports {len(code)=} {file=} {hint=}")
 {aio.pep0723.Config.pkg_repolist[0]['-CDN-']=}
 
 """
@@ -1475,6 +1480,7 @@ except:
 
 async def import_site(__file__, run=True):
     import builtins
+
     if builtins.LOCK:
         platform.window.console.error("1473: import_site IS NOT RE ENTRANT")
         return
@@ -1643,4 +1649,4 @@ async def import_site(__file__, run=True):
             shell.interactive(prompt=True)
             return None
     finally:
-        LOCK = False
+        builtins.LOCK = False

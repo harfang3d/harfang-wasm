@@ -136,7 +136,7 @@ char buf[FD_BUFFER_MAX];
 #   pragma message  "  @@@@@@@@@@@ NOT YET ../build/gen_inittab.h @@@@@@@@@@@@"
 #endif
 
-
+#if defined(PYDK_static_hpy)
 // ===== HPY =======
 
 #define HPY_ABI_UNIVERSAL
@@ -172,9 +172,9 @@ PyInit__platform(void)
 {
     return (PyObject *)_HPyModuleDef_AsPyInit(&hpy_platform_def);
 }
+#endif // hpy
 
-
-#endif // PKPY
+#endif // !PKPY
 
 
 
@@ -384,7 +384,7 @@ embed_set_ps2(PyObject *self, PyObject *_null) {
 static PyObject *
 embed_prompt(PyObject *self, PyObject *_null) {
     if (sys_ps==1)
-        fprintf( stderr, ">=> ");
+        fprintf( stderr, ">>> ");
     else
         fprintf( stderr, "... ");
     embed_flush(self,_null);
@@ -997,7 +997,11 @@ main(int argc, char **argv)
 
     PyImport_AppendInittab("embed", PyInit_embed);
 
+// wip hpy
+#if defined(PYDK_static_hpy)
     PyImport_AppendInittab("_platform", PyInit__platform);
+#endif
+
 
 #   include "../build/gen_inittab.c"
 

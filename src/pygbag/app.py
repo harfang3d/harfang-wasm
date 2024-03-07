@@ -36,6 +36,7 @@ DEFAULT_SCRIPT = "main.py"
 DEFAULT_CONSOLE = 25
 DEFAULT_LINES = 57
 DEFAULT_COLUMNS = 132
+DEFAULT_PYBUILD = "3.12"
 
 CACHE_ROOT = Path("build")
 CACHE_PATH = CACHE_ROOT / "web-cache"
@@ -161,17 +162,21 @@ def cache_check(app_folder, devmode=False):
 
     if clear_cache:
         win32 = sys.platform == "win32"
-        if shutil.rmtree.avoids_symlink_attacks or win32:
-            if cache_dir.is_dir():
+        if cache_dir.is_dir():
+            if shutil.rmtree.avoids_symlink_attacks or win32:
                 if win32:
                     warnings.warn("clear cache : rmtree is not safe on that system (win32)")
                 shutil.rmtree(cache_dir.as_posix())
-        else:
-            print(
-                "115: cannot clear cache : rmtree is not safe on that system",
-                file=sys.stderr,
-            )
-            raise SystemExit(115)
+            else:
+                print(
+                    "171: cannot clear cache : rmtree is not safe on that system",
+                    file=sys.stderr,
+                )
+                print(
+                    "175: Please remove build folder manually",
+                    file=sys.stderr,
+                )
+                raise SystemExit(115)
 
         # rebuild
         make_cache_dirs()
@@ -210,8 +215,8 @@ async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
 
     parser.add_argument(
         "--PYBUILD",
-        default="3.11",
-        help="Specify python version [default:%s]" % "3.11",
+        default=DEFAULT_PYBUILD,
+        help="Specify python version [default:%s]" % DEFAULT_PYBUILD,
     )
 
     parser.add_argument(

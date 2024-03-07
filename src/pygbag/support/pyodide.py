@@ -23,10 +23,16 @@ del m_pyodide
 import pyodide
 
 class m_canvas:
-    def getCanvas3D(self, name='canvas',width=1024,height=1024):
-        canvas = platform.document.getElementById("canvas")
-        canvas.width = width
-        canvas.height = height
+    def getCanvas3D(self, name='canvas',width=0,height=0):
+        canvas = platform.document.getElementById(name)
+        try:
+            width = width or canvas.width
+            height = height or canvas.height
+            #print(f"canvas size was previously set to : {width=} x {height=}")
+        except:
+            pass
+        canvas.width = width or 1024
+        canvas.height = height or 1024
         return canvas
 
 class m_pyodide_js:

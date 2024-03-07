@@ -1036,15 +1036,22 @@ async function feat_vtx(debug_hidden) {
         document.body.appendChild(terminal)
     }
 
+    var console_divider = 1
     const cols = get_terminal_cols()
-    const cons = get_terminal_console()
+    var cons = get_terminal_console()
+    if (cons<0) {
+        console_divider = -cons
+        cons = 0
+    }
+
     const { WasmTerminal } = await import("./vtx.js")
     const lines = get_terminal_lines() + cons  // including virtual get_terminal_console()
     const py = window.document.body.clientHeight
     var fntsize = Math.floor(py/lines) - 1
 
-    if (lines<=33)
-        fntsize = fntsize - 5
+    if (lines<=33) {
+        fntsize = ( fntsize - 5 ) / console_divider
+    }
 
     console.warn("fnt:",window.document.body.clientHeight ,"/", lines,"=", fntsize, " Cols:", cols, "Cons:", cons)
     vm.vt = new WasmTerminal(
@@ -1569,10 +1576,12 @@ MM.unpause = function unpause(trackid) {
 }
 
 MM.set_volume = function set_volume(trackid, vol) {
+    console.log(`MM.set_volume track=${trackid} vol=${vol}`)
     MM[trackid].media.volume = 1 * vol
 }
 
-MM.set_volume = function get_volume(trackid, vol) {
+MM.get_volume = function get_volume(trackid, vol) {
+    console.log(`MM.get_volume track=${trackid} vol=${vol}`)
     return MM[trackid].media.volume
 }
 

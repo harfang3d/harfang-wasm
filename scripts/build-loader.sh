@@ -4,7 +4,19 @@
 
 . ${CONFIG:-$SDKROOT/config}
 
-#
+if [ -f vendor/vendor.sh ]
+then
+    echo "  vendor build"
+    if ${ABI3:-false}
+    then
+    echo "  vendor build (abi3) $PYBUILD"
+        if echo $PYBUILD|grep -v -q 3.12$
+        then
+            echo "abi3 vendor build only, skipping $PYBUILD"
+            exit 0
+        fi
+    fi
+fi
 
 ln -s $(pwd)/src/pygbag $(pwd)/pygbag
 
@@ -236,7 +248,9 @@ then
 
 # TODO: test -sWEBGL2_BACKWARDS_COMPATIBILITY_EMULATION
 
-    LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
+#
+
+    LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
 
     LDFLAGS="$LDFLAGS -lsqlite3"
 
