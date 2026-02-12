@@ -67,13 +67,14 @@ PYTHONOPTIMIZE=TRUE ${SDKROOT}/python3-wasm -O setup.py build
 # link static
 . ${SDKROOT}/emsdk/emsdk_env.sh
 
-if echo ${PYMAJOR}${PYMINOR}|grep -q 313
+if echo ${PYMAJOR}${PYMINOR}|grep -q 314
 then
-    export PYTHR="t"
+    # export PYTHR="t"
+    echo "TODO: free threading"
 fi
 
 
-    $SDKROOT/emsdk/upstream/emscripten/emar rcs ${SDKROOT}/prebuilt/emsdk/libhpy${PYMAJOR}.${PYMINOR}.a \
+if $SDKROOT/emsdk/upstream/emscripten/emar rcs ${SDKROOT}/prebuilt/emsdk/libhpy${PYMAJOR}.${PYMINOR}.a \
  build/temp.wasm32-${WASM_FLAVOUR}-emscripten-cpython-${PYMAJOR}${PYMINOR}${PYTHR}/hpy/debug/src/_debugmod.o \
  build/temp.wasm32-${WASM_FLAVOUR}-emscripten-cpython-${PYMAJOR}${PYMINOR}${PYTHR}/hpy/debug/src/autogen_debug_wrappers.o \
  build/temp.wasm32-${WASM_FLAVOUR}-emscripten-cpython-${PYMAJOR}${PYMINOR}${PYTHR}/hpy/debug/src/debug_ctx.o \
@@ -109,19 +110,21 @@ fi
  build/temp.wasm32-${WASM_FLAVOUR}-emscripten-cpython-${PYMAJOR}${PYMINOR}${PYTHR}/hpy/universal/src/ctx_meth.o \
  build/temp.wasm32-${WASM_FLAVOUR}-emscripten-cpython-${PYMAJOR}${PYMINOR}${PYTHR}/hpy/universal/src/ctx_misc.o \
  build/temp.wasm32-${WASM_FLAVOUR}-emscripten-cpython-${PYMAJOR}${PYMINOR}${PYTHR}/hpy/universal/src/hpymodule.o
-
-# local publish
-if [ -d $WHEELS ]
 then
-    # build wheel for wasm
-    PYTHONOPTIMIZE=TRUE ${SDKROOT}/python3-wasm -m build --no-isolation .
 
-    mv dist/*wasm*whl $WHEELS/cp${PYMAJOR}${PYMINOR}/
+    # local publish
+    if [ -d $WHEELS ]
+    then
+        # build wheel for wasm
+        PYTHONOPTIMIZE=TRUE ${SDKROOT}/python3-wasm -m build --no-isolation .
+
+        mv dist/*wasm*whl $WHEELS/cp${PYMAJOR}${PYMINOR}/
+    fi
+
+    popd
+else
+    echo "failed to link static";exit 125
 fi
-
-popd
-
-
 
 
 

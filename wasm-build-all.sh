@@ -1,15 +1,17 @@
 #!/bin/bash
 reset
 
+cp -vf /opt/python-wasm-sdk/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic/libSDL2_mixer-ogg.a /opt/python-wasm-sdk/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic/libSDL2_mixer_ogg.a
+
 export CI=${CI:-false}
 
 export WORKSPACE=${GITHUB_WORKSPACE:-$(pwd)}
 
-export BUILDS=${BUILDS:-3.12 3.11}
+export BUILDS=${BUILDS:-3.12 3.13 3.14}
 
 export STATIC=${STATIC:-true}
 
-export PYGBAG_PKG=${PYGBAG_VER:-0.9.2}
+export PYGBAG_PKG=${PYGBAG_VER:-0.9.3}
 
 . scripts/vendoring.sh
 
@@ -54,7 +56,7 @@ do
     . ${CONFIG:-$SDKROOT/config}
 
     echo "
-    * building loader for CPython${PYMAJOR}.${PYMINOR} $PYBUILD
+    * building ${PYGBAG_PKG} loader for CPython${PYMAJOR}.${PYMINOR} $PYBUILD
     "
 
     ./scripts/build-loader.sh
@@ -75,6 +77,36 @@ fi
 
 
 
-#
 
+if [ -d ../cdn ]
+then
+echo "
+
+_____________________________________________________________________
+  setting up cdn with ${PYGBAG_PKG}/cpython${PYMAJOR}${PYMINOR}
+  in $(realpath ../cdn)
+  and mappings for pkg, abi3 + cp???
+_____________________________________________________________________
+
+"
+    mkdir -p ../cdn/${PYGBAG_PKG}/cpython${PYMAJOR}${PYMINOR}
+
+    cp -v ./src/pygbag/support/cpythonrc.py static/pythons.js static/favicon.png ../cdn/${PYGBAG_PKG}/
+
+    mv -v build/web/archives/0.0/cpython${PYMAJOR}${PYMINOR}/main.* ../cdn/${PYGBAG_PKG}/cpython${PYMAJOR}${PYMINOR}/
+
+    #mv -v external/pygame-wasm/dist/*whl
+
+    mv -v external/*/dist/*-abi3-wasm32_bi_emscripten.whl ../cdn/abi3/
+    mv -v external/*/dist/*cp3*-wasm32_bi_emscripten.whl ../cdn/cp${PYMAJOR}${PYMINOR}/
+
+    # use pygbag module from source, not any already installed.
+    export PYTHONPATH=$(pwd)/src
+
+    pushd ../cdn
+        ${SDKROOT}/devices/$(arch)/usr/bin/python${PYBUILD} ./buildmap.py
+    popd
+
+    du -hs /data/git/cdn/${PYGBAG_PKG}/*
+fi
 

@@ -239,128 +239,17 @@ then
     fi
 else
     echo "skipping cython regen"
-touch $(find | grep pxd$)
-$HPY setup.py cython_only
-
 fi
 
-#$HPY ${WORKSPACE}/src/replacer.py --go "Py_GIL_DISABLED'\): raise ImportError" "Py_GIL_DISABLED'): print(__name__)"
-
-# do not link -lSDL2 some emmc versions will think .so will use EM_ASM
-#SDL_IMAGE="-s USE_SDL=2 -lfreetype -lwebp"
-SDL_IMAGE="-lSDL2 -lfreetype -lwebp"
-
-export CFLAGS="-DBUILD_STATIC -DSDL_NO_COMPAT $SDL_IMAGE"
-EMCC_CFLAGS="-I${SDKROOT}/emsdk/upstream/emscripten/cache/sysroot/include/freetype2"
-EMCC_CFLAGS="$EMCC_CFLAGS -I$PREFIX/include/SDL2"
-EMCC_CFLAGS="$EMCC_CFLAGS -Wno-unused-command-line-argument"
-EMCC_CFLAGS="$EMCC_CFLAGS -Wno-unreachable-code-fallthrough"
-EMCC_CFLAGS="$EMCC_CFLAGS -Wno-unreachable-code"
-EMCC_CFLAGS="$EMCC_CFLAGS -Wno-parentheses-equality"
-EMCC_CFLAGS="$EMCC_CFLAGS -Wno-unknown-pragmas"
-
-
-# FIXME 3.13
-EMCC_CFLAGS="$EMCC_CFLAGS -Wno-deprecated-declarations"
-
-
-
-export EMCC_CFLAGS="$EMCC_CFLAGS -DHAVE_STDARG_PROTOTYPES -ferror-limit=1 -fpic -DBUILD_STATIC"
-export COPTS="-O2 -g3 -DBUILD_STATIC"
-export CC=emcc
-
-# remove SDL1 for good
-rm -rf ${SDKROOT}/emsdk/upstream/emscripten/cache/sysroot/include/SDL
-
-[ -d build ] && rm -r build
-[ -f Setup ] && rm Setup
-[ -f ${SDKROOT}/prebuilt/emsdk/libpygame${PYBUILD}.a ] && rm ${SDKROOT}/prebuilt/emsdk/libpygame${PYBUILD}.a
-
-if $SDKROOT/python3-wasm setup.py -config -auto -sdl2
-then
-    $SDKROOT/python3-wasm setup.py build -j1 || echo "encountered some build errors" 1>&2
-
-    OBJS=$(find build/temp.wasm32-*/|grep o$)
-
-
-    $SDKROOT/emsdk/upstream/emscripten/emar rcs ${SDKROOT}/prebuilt/emsdk/libpygame${PYBUILD}.a $OBJS
-    for obj in $OBJS
-    do
-        echo $obj
-    done
-
-    # to install python part (unpatched)
-    cp -r src_py/. ${PKGDIR:-${SDKROOT}/prebuilt/emsdk/${PYBUILD}/site-packages/pygame/}
-
-    # prepare testsuite
-    [ -d ${ROOT}/build/pygame-test ] && rm -fr ${ROOT}/build/pygame-test
-    mkdir ${ROOT}/build/pygame-test
-    cp -r test ${ROOT}/build/pygame-test/test
-    cp -r examples ${ROOT}/build/pygame-test/test/
-    cp ${ROOT}/packages.d/pygame/tests/main.py ${ROOT}/build/pygame-test/
-
-else
-    echo "ERROR: pygame configuration failed" 1>&2
-    exit 109
-fi
-
-popd
-popd
-
-TAG=${PYMAJOR}${PYMINOR}
-
-
-echo "FIXME: build wheel"
-
-SDL2="-sUSE_ZLIB=1 -sUSE_BZIP2=1 -sUSE_LIBPNG"
-SDL2="$SDL2 -sUSE_FREETYPE -sUSE_SDL=2 -sUSE_SDL_MIXER=2 -lSDL2 -L${SDKROOT}/devices/emsdk/usr/lib"
-
-if echo $EMFLAVOUR|grep -q ^4
-then
-    SDL2="$SDL2 -lSDL2_image -lSDL2_gfx -lSDL2_mixer -lSDL2_mixer-ogg -lSDL2_ttf"
-else
-    SDL2="$SDL2 -lSDL2_image -lSDL2_gfx -lSDL2_mixer -lSDL2_mixer_ogg -lSDL2_ttf"
-fi
-
-SDL2="$SDL2 -lvorbis -logg -lwebp -lwebpdemux -ljpeg -lpng -lharfbuzz -lfreetype"
-SDL2="$SDL2 -lssl -lcrypto -lffi -lbz2 -lz -ldl -lm"
-
-
-TARGET_FOLDER=$(pwd)/testing/pygame_static-1.0-cp${TAG}-cp${TAG}-wasm32_${WASM_FLAVOUR}_emscripten
-
-if [ -d ${TARGET_FOLDER} ]
-then
-
-    TARGET_FILE=${TARGET_FOLDER}/pygame_static.cpython-${TAG}-wasm32-emscripten.so
-
-    . ${SDKROOT}/emsdk/emsdk_env.sh
-
-    [ -f ${TARGET_FILE} ] && rm ${TARGET_FILE} ${TARGET_FILE}.map
-
-    COPTS="-Os -g0" emcc -shared -fpic -o ${TARGET_FILE} $SDKROOT/prebuilt/emsdk/libpygame${PYMAJOR}.${PYMINOR}.a $SDL2
-
-    # github CI does not build wheel for now.
-    echo ${WHEEL_DIR}
-    if [ -d ${WHEEL_DIR} ]
+    if $SDKROOT/python3-wasm dev.py build --wheel
     then
-        mkdir -p $TARGET_FOLDER
-        /bin/cp -rf testing/pygame_static-1.0-cp${TAG}-cp${TAG}-wasm32_mvp_emscripten/. ${TARGET_FOLDER}/
-
-        if pushd testing/pygame_static-1.0-cp${TAG}-cp${TAG}-wasm32_${WASM_FLAVOUR}_emscripten
-        then
-            rm ${TARGET_FILE}.map
-            WHEEL_PATH=${WHEEL_DIR}/$(basename $(pwd)).whl
-            [ -f $WHEEL_PATH ] && rm $WHEEL_PATH
-            zip $WHEEL_PATH -r .
-            rm ${TARGET_FILE}
-            popd
-        fi
+        touch ${SDKROOT}/prebuilt/emsdk/lib${pkg}${PYBUILD}.a
     else
-        echo " =========== no wheel build from ${TARGET_FOLDER} ==========="
+        echo "${pkg} build failed"
+        rm ${SDKROOT}/prebuilt/emsdk/lib${pkg}${PYBUILD}.a
     fi
 
-fi
-
-
+    popd
+popd
 
 

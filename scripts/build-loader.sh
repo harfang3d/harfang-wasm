@@ -133,7 +133,7 @@ LOPTS="-sENVIRONMENT=node,web -sMAIN_MODULE=1"
 
 
 echo "  ************************************"
-if [ -f dev ]
+if ${DEV:-false}
 then
     export COPTS="-O0 -g3 -fPIC --source-map-base http://localhost:8000/maps/"
     echo "       building DEBUG $COPTS"
@@ -345,11 +345,13 @@ then
     cat > final_link.sh <<END
 #!/bin/bash
 . $SDKROOT/emsdk/emsdk_env.sh
+echo COPTS=$COPTS
+echo LOPTS=$LOPTS
 COPTS="$LOPTS" emcc -D__PYGBAG__ \\
  $FINAL_OPTS \\
  -DNDEBUG  \\
      -sTOTAL_MEMORY=256MB -sSTACK_SIZE=8MB -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \\
-    -sEXPORTED_RUNTIME_METHODS=FS,print \\
+    -sEXPORTED_RUNTIME_METHODS=FS,print,createContext \\
      $CF_SDL \\
      --use-preload-plugins \\
      $STDLIBFS \\

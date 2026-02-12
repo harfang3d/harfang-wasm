@@ -219,9 +219,9 @@ END
     # TODO: get wheel file from script and move it to the right place
 
     export TAG=${PYMAJOR}${PYMINOR}
-    export WHEEL_DIR_PURE=/data/git/archives/repo/pkg
-    export WHEEL_DIR_ABI3=/data/git/archives/repo/${PYGBAG_VERSION}
-    export WHEEL_DIR=/data/git/archives/repo/cp${TAG}-${PYGBAG_VERSION}
+    export WHEEL_DIR_PURE=/data/git/cdn/pkg
+    export WHEEL_DIR_ABI3=/data/git/cdn/abi3
+    export WHEEL_DIR=/data/git/cdn/cp${TAG}-${PYGBAG_VERSION}
 
 
     if ./${PKG_PATH}.sh

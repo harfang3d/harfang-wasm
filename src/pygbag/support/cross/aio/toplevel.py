@@ -245,8 +245,8 @@ if not __UPY__:
                 cls.make_instance(shell, ns)
 
             if cls.console is None:
-                asyncio.create_task(cls.instance.interact())
                 cls.console = cls.instance
+                asyncio.create_task(cls.instance.interact())
 
         @classmethod
         async def start_toplevel(cls, shell, console=True, ns="__main__"):

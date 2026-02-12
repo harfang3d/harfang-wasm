@@ -52,7 +52,8 @@ CACHE_VERSION = CACHE_ROOT / "version.txt"
 CACHE_APP = CACHE_ROOT / "web"
 
 cdn_dot = VERSION.split(".")
-cdn_dot.pop()
+if cdn_dot[1]=='0':
+    cdn_dot.pop()
 cdn_version = ".".join(cdn_dot)
 del cdn_dot
 
@@ -82,7 +83,7 @@ else:
     if cdn_version == "0.0":
         DEFAULT_CDN = f"https://pygame-web.github.io/pygbag/{cdn_version}/"
     else:
-        DEFAULT_CDN = f"https://pygame-web.github.io/archives/{cdn_version}/"
+        DEFAULT_CDN = f"https://pygame-web.github.io/cdn/{cdn_version}/"
     DEFAULT_PORT = 8000
     DEFAULT_TMPL = "default.tmpl"
 

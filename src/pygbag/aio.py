@@ -32,11 +32,11 @@ please use :
     import aio.pep0723
 
     if aio.pep0723.Config.dev_mode:
-        aio.pep0723.Config.PKG_INDEXES.extend(["http://localhost:8000/archives/repo/"])
+        aio.pep0723.Config.PKG_INDEXES.extend(["http://localhost:8000/cdn/"])
     else:
         aio.pep0723.Config.PKG_INDEXES.extend(
             [
-                os.environ.get("PYGPY", "https://pygame-web.github.io/archives/repo/"),
+                os.environ.get("PYGPY", "https://pygame-web.github.io/cdn/"),
             ]
         )
 
