@@ -16,25 +16,33 @@ import shutil
 from datetime import datetime
 
 from .__init__ import VERSION
+from .example_config import EXAMPLE_CONFIG
 
-if '--no_ssl_check' in sys.argv:
+if "--no_ssl_check" in sys.argv:
     import ssl
+
     # ssl local server testing.
     ssl._create_default_https_context = ssl._create_unverified_context
-    #os.environ["REQUESTS_CA_BUNDLE"]="/etc/ssl/certs/ca-bundle.crt"
+    # os.environ["REQUESTS_CA_BUNDLE"]="/etc/ssl/certs/ca-bundle.crt"
     sys.argv.remove("--no_ssl_check")
 
 import pygbag
 
 from . import pack
 from . import web
+from .config_types import Config
+# TODO: use another parser for the check
+#from .support.cross.aio.pep0723 import read_dependency_block_723
+
+
+from .config_to_object import load_config
 
 
 devmode = "--dev" in sys.argv
 
 DEFAULT_SCRIPT = "main.py"
 DEFAULT_CONSOLE = 25
-DEFAULT_LINES = 57
+DEFAULT_LINES = 50
 DEFAULT_COLUMNS = 132
 DEFAULT_PYBUILD = "3.12"
 
@@ -44,7 +52,8 @@ CACHE_VERSION = CACHE_ROOT / "version.txt"
 CACHE_APP = CACHE_ROOT / "web"
 
 cdn_dot = VERSION.split(".")
-cdn_dot.pop()
+if cdn_dot[1]=='0':
+    cdn_dot.pop()
 cdn_version = ".".join(cdn_dot)
 del cdn_dot
 
@@ -74,12 +83,15 @@ else:
     if cdn_version == "0.0":
         DEFAULT_CDN = f"https://pygame-web.github.io/pygbag/{cdn_version}/"
     else:
-        DEFAULT_CDN = f"https://pygame-web.github.io/archives/{cdn_version}/"
+        DEFAULT_CDN = f"https://pygame-web.github.io/cdn/{cdn_version}/"
     DEFAULT_PORT = 8000
     DEFAULT_TMPL = "default.tmpl"
 
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 720
+
+def warn(msg):
+    print(f"WARNING! {msg}")
 
 
 def set_args(program):
@@ -189,6 +201,26 @@ def cache_check(app_folder, devmode=False):
 
 async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
     global DEFAULT_PORT, DEFAULT_SCRIPT, APP_CACHE, required
+
+    # Checks for existance of PEP 723 header on main.py https://peps.python.org/pep-0723/
+    main_file = Path(app_folder, mainscript)
+    with open(main_file, "r") as f:
+        src_code = f.read()
+
+    # TODO: match import list and pep block content
+    if 0:
+        has_pep723 = False
+        deps = {"pygame-ce"}
+        for dep in read_dependency_block_723(src_code):
+            has_pep723 = True
+            if dep == "pygame-ce":
+                pass
+            elif dep == "pygame":
+                warnings.warn("Pygbag uses pygame-ce for running on web. If you're using pygame, you should probably upgrade to pygame-ce, it is backwards compatible so your code will still work. If you're using pygame-ce already, specify 'pygame-ce' instead of 'pygame'.")
+            else:
+                deps.add(dep)
+        if not has_pep723:
+            warnings.warn("Couldn't find PEP 723 Header. See this: https://pygame-web.github.io/wiki/pygbag/#complex-packages")
 
     DEFAULT_SCRIPT = mainscript or DEFAULT_SCRIPT
 
@@ -313,6 +345,8 @@ async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
         help="web site to cache locally [default:%s]" % cdn,
     )
 
+    parser.add_argument("--ini", default=False, action="store_true", help="Initialize an example pygbag.ini config file")
+
     parser.add_argument(
         "--template",
         default=DEFAULT_TMPL,
@@ -328,6 +362,13 @@ async def main_run(app_folder, mainscript, cdn=DEFAULT_CDN):
         type=int,
         nargs="?",
         help="Specify alternate port [default: 8000]",
+    )
+
+    parser.add_argument(
+        "--disable-sound-format-error",
+        action="store_true",
+        default=False,
+        help="audio files with a common unsupported format found in the assets won't raise an exception",
     )
 
     args = parser.parse_args()
@@ -396,15 +437,42 @@ now packing application ....
         "spdx": "cookiecutter.spdx",
         "version": VERSION,
         "PYBUILD": args.PYBUILD,
-        "COLUMNS" : args.COLUMNS,
-        "LINES" : args.LINES,
-        "CONSOLE" : args.CONSOLE,
+        "COLUMNS": args.COLUMNS,
+        "LINES": args.LINES,
+        "CONSOLE": args.CONSOLE,
+        "INI": args.ini,
     }
 
+    if args.ini:
+        if not os.path.exists("pygbag.ini"):
+            with open("pygbag.ini", "w") as f:
+                f.write(EXAMPLE_CONFIG)
+        else:
+            print("ERROR: You already have an pygbag.ini file. Please delete it before attempting to init a fresh config.")
+            raise SystemExit
+
+    if os.path.exists("pygbag.ini"):
+        config: Config = load_config("pygbag.ini")
+        ignore_files = config.DEPENDENCIES.ignorefiles
+        ignore_dirs = config.DEPENDENCIES.ignoredirs
+    else:
+        print("WARNING: No pygbag.ini found! See: https://pygame-web.github.io/wiki/pygbag-configuration")
+        ignore_files = []
+        ignore_dirs = []
+
+    for ignore_arr in [ignore_files, ignore_dirs]:
+        for ignored in ignore_arr:
+            if ignored.strip().find(" ") != -1:  # has space in folder/file name
+                print(f"|{ignored}|")
+                print("ERROR! You cannot use folder/files with spaces in it.")
+                raise SystemExit  # maybe use a custom pygbag exception
 
     pygbag.config = CC
 
-    await pack.archive(f"{app_name}.apk", app_folder, build_dir)
+    print(f"Ignored dirs: {ignore_dirs}")
+    print(f"Ignored files: {ignore_files}")
+
+    await pack.archive(f"{app_name}.apk", app_folder, ignore_dirs, ignore_files, build_dir)
 
     def cache_file(remote_url, suffix):
         nonlocal cache_dir

@@ -43,6 +43,7 @@ try:
     # bokeh
     sys.stdout.reconfigure(encoding='unicode-escape')
     sys.stdout.reconfigure(encoding='utf-16')
+    sys.stdout.reconfigure(encoding='utf_16-be')
     sys.stdout.reconfigure(encoding='utf-8')
 except:
     pass
@@ -67,6 +68,11 @@ import platform
 
 # for pyodide runPython emulation
 from textwrap import dedent
+
+# requests/urllib3 pyodide workaround
+import http.cookiejar
+from http.cookies import Morsel
+import encodings.idna
 
 # FIXME: because _sqlite3 is builtins anyway ?
 import sqlite3
@@ -110,6 +116,12 @@ import distutils.spawn
 
 #matplotlib
 import uuid
+
+# psycopg
+import zoneinfo
+
+# pandas
+import tarfile
 
 #arcade
 import ctypes.util
@@ -168,8 +180,8 @@ import optparse
 # bokeh
 import hmac
 
-#ursina
-import imghdr
+#ursina, not in 3.13
+# import imghdr
 
 # pep722
 import pyparsing
@@ -192,8 +204,19 @@ echo "-----------------------------------------------------------"
 $HPY -u -I -B <<END
 import sys, os
 stdlp=""
+
+
+threading_model = os.popen('${HPY}-config --abiflags').read().strip()
+
+
+if 't' in threading_model:
+    SCD="_sysconfigdata_t"
+else:
+    SCD="_sysconfigdata_"
+
 with open("build/stdlib.list","w") as tarlist:
-    sysconf = "_sysconfigdata__linux_$(arch)-linux-gnu.py"
+
+    sysconf = f"{SCD}_linux_$(arch)-linux-gnu.py"
     with open("$FS") as fs:
         for l in fs.readlines():
             #print( l.strip() )

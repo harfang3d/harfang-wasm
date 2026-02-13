@@ -1,4 +1,4 @@
-from os import walk
+import os
 from pathlib import Path
 
 
@@ -11,7 +11,7 @@ def gather(root: Path, *kw):
         if root.name == "main.py":
             raise Error("project must be a folder or an archive")
 
-    for current, dirnames, filenames in walk(root):
+    for current, dirnames, filenames in os.walk(root):
         rel = Path("/").joinpath(Path(current).relative_to(root))
 
         # print(rel, len(dirnames), len(filenames))

@@ -1,8 +1,9 @@
+// #define SDL3 1
+
 /*
 // from python-main.c
 static PyStatus pymain_init(const _PyArgv *args);
 static void pymain_free(void);
-
 
     http://troubles.md/why-do-we-need-the-relooper-algorithm-again/
 
@@ -15,7 +16,6 @@ static void pymain_free(void);
 tty ?
 https://github.com/emscripten-core/emscripten/blob/6dc4ac5f9e4d8484e273e4dcc554f809738cedd6/src/library_syscall.js#L311
     finish ncurses : https://github.com/jamesbiv/ncurses-emscripten
-
 
 headless tests ?
 
@@ -39,14 +39,13 @@ self hosting:
     https://github.com/jprendes/emception
 
 debug:
-    https://developer.chrome.com/blog/wasm-debugging-2020/
+   https://developer.chrome.com/blog/wasm-debugging-2020/
 
 
 */
 
 
 #include <unistd.h>
-
 
 
 static int preloads = 0;
@@ -91,8 +90,13 @@ char buf[FD_BUFFER_MAX];
 // TODO: store input frame counter + timestamps for all I/O
 // for ascii app record/replay.
 
-
-
+#if defined(INC_TEST)
+#define xstr(s) str(s)
+#define str(s) #s
+#define INC_TEST_FILE xstr(INC_TEST)
+#define MAIN_TEST_FILE xstr(MAIN_TEST)
+#include INC_TEST_FILE
+#endif
 
 
 #if defined(WAPY)
@@ -563,6 +567,15 @@ puts("481");
 }
 #endif // TEST_ASYNCSLEEP
 
+#if SDL3
+#include <SDL3/SDL.h>
+static void sdlError(const char* str) {
+  fprintf(stderr, "Error at %s: %s\n", str, SDL_GetError());
+  exit(1);
+}
+
+#endif
+
 #if SDL2
 static PyObject *
 embed_get_sdl_version(PyObject *self, PyObject *_null)
@@ -574,7 +587,23 @@ embed_get_sdl_version(PyObject *self, PyObject *_null)
 }
 #endif
 
-
+#if PY_VERSION_HEX >= 0x030D0000
+#   if !defined(Py_GIL_DISABLED)
+        #pragma message "unsupported Py_LIMITED_API/Py_GIL_DISABLED combination"
+EMSCRIPTEN_KEEPALIVE void
+_Py_DecRefShared(PyObject *o) {
+    Py_XDECREF(o);
+}
+EMSCRIPTEN_KEEPALIVE uintptr_t
+_Py_GetThreadLocal_Addr(void) {
+    return 0;
+}
+EMSCRIPTEN_KEEPALIVE void
+_Py_MergeZeroLocalRefcount(PyObject *op) {
+    _Py_Dealloc(op);
+}
+#   endif
+#endif
 
 static PyMethodDef mod_embed_methods[] = {
     {"run", (PyCFunction)embed_run, METH_VARARGS | METH_KEYWORDS, "start aio stepping"},
@@ -618,6 +647,20 @@ static PyMethodDef mod_embed_methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+
+/* later for mphase
+static struct PyModuleDef_Slot mod_embed_slots[] = {
+#if PY_VERSION_HEX >= 0x030D0000
+    {Py_mod_gil, Py_MOD_GIL_NOT_USED},
+#endif
+    {0, NULL}
+};
+#if PY_VERSION_HEX >= 0x030D0000
+    .m_slots = mod_embed_slots,
+#endif
+*/
+
+
 static struct PyModuleDef mod_embed = {
     PyModuleDef_HEAD_INIT,
     "embed",
@@ -660,6 +703,9 @@ type_init_failed:;
 // helper module for pygbag api not well defined and need clean up.
 // callable as "platform" module.
     PyObject *embed_mod = PyModule_Create(&mod_embed);
+#if defined(Py_GIL_DISABLED)
+    PyUnstable_Module_SetGIL(embed_mod, Py_MOD_GIL_NOT_USED);
+#endif
 
 // from old aiolink poc
     //embed_dict = PyModule_GetDict(embed_mod);
@@ -949,17 +995,15 @@ embed_webgl(PyObject *self, PyObject *argv, PyObject *kw)
     EGLConfig config;
 
     char * target = NULL;
-    if (!PyArg_ParseTuple(argv, "|s", &target)) {
-        target = NULL;
-    }
+
     EmscriptenWebGLContextAttributes attr;
     emscripten_webgl_init_context_attributes(&attr);
     attr.alpha = 0;
-    if (target) {
+    if (!PyArg_ParseTuple(argv, "|s", &target)) {
+        ctx = emscripten_webgl_create_context("#canvas", &attr);
+    } else {
         ctx = emscripten_webgl_create_context(target, &attr);
         setenv("WebGL", target, 1);
-    } else {
-        ctx = emscripten_webgl_create_context("#canvas", &attr);
     }
 
     emscripten_webgl_make_context_current(ctx);
@@ -982,19 +1026,14 @@ main_(int argc, char **argv)
 
 #else
 #define CPY 1
+
+//#include "pycore_initconfig.h"    // _PyArgv
+
 int
 main(int argc, char **argv)
 #endif
 {
     gettimeofday(&time_last, NULL);
-
-    _PyArgv args = {
-        .argc = argc,
-        .use_bytes_argv = 1,
-        .bytes_argv = argv,
-        .wchar_argv = NULL
-    };
-
     PyImport_AppendInittab("embed", PyInit_embed);
 
 // wip hpy
@@ -1002,15 +1041,20 @@ main(int argc, char **argv)
     PyImport_AppendInittab("_platform", PyInit__platform);
 #endif
 
-
 #   include "../build/gen_inittab.c"
 
 // defaults
     setenv("LC_ALL", "C.UTF-8", 0);
     setenv("TERMINFO", "/usr/share/terminfo", 0);
-    setenv("COLUMNS","132", 0);
-    setenv("LINES","30", 0);
-    setenv("PYGBAG","1", 1);
+    setenv("COLUMNS", "132", 0);
+    setenv("LINES", "30", 0);
+//
+    setenv("PYGBAG", "1", 1);
+
+    #if defined(Py_GIL_DISABLED)
+        setenv("PYTHON_GIL", "0", 1);
+    #endif
+
 
 //    setenv("PYTHONINTMAXSTRDIGITS", "0", 0);
     setenv("LANG", "en_US.UTF-8", 0);
@@ -1019,25 +1063,38 @@ main(int argc, char **argv)
     setenv("NCURSES_NO_UTF8_ACS", "1", 0);
     setenv("MPLBACKEND", "Agg", 0);
 
-
 // force
-    setenv("PYTHONHOME","/usr", 1);
+    setenv("PYTHONHOME", "/usr", 1);
     setenv("PYTHONUNBUFFERED", "1", 1);
-    setenv("PYTHONINSPECT","1",1);
+    setenv("PYTHONINSPECT", "1",1);
     setenv("PYTHONDONTWRITEBYTECODE","1",1);
     setenv("HOME", "/home/web_user", 1);
     setenv("APPDATA", "/home/web_user", 1);
 
-    setenv("PYGLET_HEADLESS", "1", 1);
+    // setenv("PYGLET_HEADLESS", "1", 1);
+    setenv("PSYCOPG_WAIT_FUNC", "wait_select", 1);
+
+// rich
+    setenv("FORCE_COLOR", "1", 1);
+
+// termtk
+    setenv("TERMTK_FORCESERIAL", "1", 1);
+
+
+/*
+    puts(" ---------- pymain_init ------------");
+    _PyArgv args = {
+        .argc = argc,
+        .use_bytes_argv = 0,
+        .bytes_argv = NULL,
+        .wchar_argv = argv
+    };
 
     status = pymain_init(&args);
+*/
+    status = pymain_init(NULL);
 
-    if (_PyStatus_IS_EXIT(status)) {
-        pymain_free();
-        return status.exitcode;
-    }
-
-    if (_PyStatus_EXCEPTION(status)) {
+    if (PyErr_Occurred()) {
         puts(" ---------- pymain_exit_error ----------");
         Py_ExitStatusException(status);
         pymain_free();
@@ -1060,7 +1117,6 @@ main(int argc, char **argv)
        puts("no 'tmp' directory, creating one ...");
     }
 
-
     for (int i=0;i<FD_MAX;i++)
         io_shm[i]= NULL;
 
@@ -1077,17 +1133,20 @@ main(int argc, char **argv)
     io_shm[IO_RAW] = memset(malloc(FD_BUFFER_MAX) , 0, FD_BUFFER_MAX);
     io_shm[IO_RCON] = memset(malloc(FD_BUFFER_MAX) , 0, FD_BUFFER_MAX);
 
+    #include MAIN_TEST_FILE
 
 
+    // https://stackoverflow.com/questions/7931182/reliably-detect-if-the-script-is-executing-in-a-web-worker
+    // self.document === undefined ?
 
 EM_ASM({
-    const FD_BUFFER_MAX = $0;
-    const shm_stdin = $1;
-    const shm_rawinput = $2;
-    const shm_rcon = $3;
+    globalThis.FD_BUFFER_MAX = $0;
+    globalThis.shm_stdin = $1;
+    globalThis.shm_rawinput = $2;
+    globalThis.shm_rcon = $3;
 
     Module.printErr = Module.print;
-    const is_worker = (typeof WorkerGlobalScope !== 'undefined') && self instanceof WorkerGlobalScope;
+    globalThis.is_worker = (typeof WorkerGlobalScope !== 'undefined') && self instanceof WorkerGlobalScope;
 
     function jswasm_load(script, aio) {
         if (!aio) aio=false;
@@ -1144,19 +1203,14 @@ EM_ASM({
             } else {
                 console.error("PyMain: BrowserFS not found");
             }
-            if ($4) {
-                SYSCALLS.getStreamFromFD(0).tty = true;
-                SYSCALLS.getStreamFromFD(1).tty = true;
-                SYSCALLS.getStreamFromFD(2).tty = false;
-            }
         }
     }
 
 
-}, FD_BUFFER_MAX, io_shm[0], io_shm[IO_RAW], io_shm[IO_RCON], CPY);
+}, FD_BUFFER_MAX, io_shm[0], io_shm[IO_RAW], io_shm[IO_RCON]);
 
+    PyRun_SimpleString("import sys, os, json, builtins, time, sysconfig");
 
-    PyRun_SimpleString("import sys, os, json, builtins, time");
     PyRun_SimpleString("sys.ps1 = ''");
 
     //PyRun_SimpleString("import hpy;import hpy.universal;print('HPy init done')");
@@ -1172,6 +1226,8 @@ EM_ASM({
     }
 #endif
 
+
+
 #if SDL2
     // SDL2 basic init
     {
@@ -1182,6 +1238,20 @@ EM_ASM({
         SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, target);
     }
 #endif
+
+#if SDL3
+    puts("================== SDL3 ====================");
+    for (int i=0;i < SDL_GetNumVideoDrivers(); i++) {
+        puts( SDL_GetVideoDriver(i) );
+    }
+  if (!SDL_Init(SDL_INIT_VIDEO)) {
+    sdlError("SDL_Init");
+  } else {
+    puts(" \n\n\n========== SDL3 init ok ====================\n\n\n");
+
+  }
+#endif
+
 #if ASYNCIFIED
     clock_t start = clock()+100;
     while (1) {
@@ -1201,7 +1271,7 @@ EM_ASM({
 
 #if defined(WAPY)
 int main(int argc, char **argv) {
-     #if MICROPY_PY_THREAD
+    #if MICROPY_PY_THREAD
     mp_thread_init();
     #endif
     // We should capture stack top ASAP after start, and it should be

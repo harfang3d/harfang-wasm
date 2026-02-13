@@ -393,6 +393,7 @@ def run(coro, *, debug=False):
         run_called = True
         started = True
 
+
         # the stepper fonction when in simulator is called from pygbag.aio
         # and is blocking script
         if aio.cross.simulator:
@@ -426,36 +427,36 @@ def run(coro, *, debug=False):
             try:
                 loop.run_forever()
             except KeyboardInterrupt:
-                print("301: closing loop")
+                print("# 434: closing loop")
                 loop.close()
 
     elif run_called:
-        pdb("273: aio.run called twice !!!")
+        pdb("# 438: aio.run called twice !!!")
 
     # run called after a custom_site() completion
     elif coro.__name__ != "custom_site":
-        pdb("360: * custom_site done *")
+        pdb("# 442: * custom_site done *")
     else:
-        pdb("364: aio.run", coro.__name__)
+        pdb("# 444: aio.run", coro.__name__)
 
 
 def exit_now(ec):
     global exit, paused
     if exit:
-        print("already exiting ...")
+        print("# 450: already exiting ...")
         return
     # rescheduling happens only where started is True
     exit = True
     while len(tasks):
         task = tasks.pop(0)
         if hasattr(task, "cancel"):
-            print(f"290: canceling {task}")
+            print(f"# 457: canceling {task}")
             task.cancel()
 
     #  will prevent another asyncio loop call, we exit next cycle on oneshots queue
     paused = True
     if not __WASM__:
-        pdb("291: exiting with code", ec)
+        pdb("# 463: exiting with code", ec)
     defer(__exit__, (ec,), {}, 0)
 
 

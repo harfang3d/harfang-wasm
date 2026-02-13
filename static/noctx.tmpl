@@ -3,7 +3,7 @@
 print("""
 Loading {{cookiecutter.title}} from {{cookiecutter.archive}}.apk
     Pygbag Version : {{cookiecutter.version}}
-    Template Version : 0.8.6
+    Template Version : 0.9.2
     Python  : {{cookiecutter.PYBUILD}}
     CDN URL : {{cookiecutter.cdn}}
     Screen  : {{cookiecutter.width}}x{{cookiecutter.height}}
@@ -120,7 +120,7 @@ async def custom_site():
             await asyncio.sleep(.1)
 
     # start async top level machinery if not started and add a console in any case if requested.
-    await aio.toplevel.handler.start_toplevel(platform.shell, console=window.python.config.debug)
+    await TopLevel_async_handler.start_toplevel(platform.shell, console=window.python.config.debug)
 
     # now that apk is mounted we have access to font cache
     # but we need to fill __file__/__name__ that are not yet set
@@ -374,6 +374,10 @@ frameborder="1"
     </div>
 
     <script type="application/javascript">
+    globalThis.__canvas_resized = (self, ecw, ech) => {
+        console.warn("TODO: panda3d canvas monitor", self, ecw, ech)
+    }
+
 
     async function custom_onload(debug_hidden) {
         // this is called before anythinh python is loaded

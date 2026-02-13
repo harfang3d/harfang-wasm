@@ -562,20 +562,20 @@ class readline(Mouse):
             action = self.state[None]
             args = (char,)
 
-#        if DEBUG:
-#            self.log(
-#                "process_char '%c' 0x%02x - Action %-20s caret = %2d line = %s esc_seq = '%s' (before)"
-#                % (printable(char), ord(char), action.__name__, self.caret, repr(self.line), self.esc_seq)
-#            )
+        #        if DEBUG:
+        #            self.log(
+        #                "process_char '%c' 0x%02x - Action %-20s caret = %2d line = %s esc_seq = '%s' (before)"
+        #                % (printable(char), ord(char), action.__name__, self.caret, repr(self.line), self.esc_seq)
+        #            )
         try:
             result = action(*args)
         except AssertionError as e:
             result = None
-#            self.log(
-#                e,
-#                "process_char '%c' 0x%02x - Action %-20s caret = %2d line = %s esc_seq = '%s' (after)"
-#                % (printable(char), ord(char), action.__name__, self.caret, repr(self.line), self.esc_seq),
-#            )
+        #            self.log(
+        #                e,
+        #                "process_char '%c' 0x%02x - Action %-20s caret = %2d line = %s esc_seq = '%s' (after)"
+        #                % (printable(char), ord(char), action.__name__, self.caret, repr(self.line), self.esc_seq),
+        #            )
 
         if not FBO:
             self.redraw()
@@ -667,8 +667,27 @@ def add_history(line: str):
 
 
 def get_history_item(index: int):
-    ...
+    pass
+
 
 
 def get_current_history_length():
     return len(readline.history)
+
+# == TODO ==
+
+def set_completer(todo):
+    pass
+
+def parse_and_bind(todo):
+    #'tab: complete'
+    pass
+
+def read_init_file(*todo):
+    pass
+
+def read_history_file(*todo):
+    pass
+
+def write_history_file(*todo):
+    pass

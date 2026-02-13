@@ -3,7 +3,7 @@
 print("""
 Loading {{cookiecutter.title}} from {{cookiecutter.archive}}.apk
     Pygbag Version : {{cookiecutter.version}}
-    Template Version : 0.8.5
+    Template Version : 0.9.0
     Python  : {{cookiecutter.PYBUILD}}
     CDN URL : {{cookiecutter.cdn}}
     Screen  : {{cookiecutter.width}}x{{cookiecutter.height}}
@@ -55,6 +55,12 @@ async def custom_site():
         return
 
     builtins.re_entered = True
+
+
+#    if '-i' in sys.orig_argv:
+#        await asyncio.sleep(5)
+
+
 
     import pygbag_app
     import pygbag_ux as ux
@@ -122,16 +128,17 @@ async def custom_site():
                 raise IOError(404)
             print_pg_bar(track.len or 100, track.pos or 0)
 
-            if str(track.avail) == "true":
+            if track.avail:
                 break
             await asyncio.sleep(0.02)
 
         # Print New Line on Complete
         print()
+        print("Done")
 
-    print('Downloading and mounting assets:')
+
+    print(f'Downloading and mounting assets on track {track.trackid} :')
     # wait until zip mount + overlayfs is complete
-    #while not track.ready:
     await pv(track)
     #await asyncio.sleep(.1)
 
@@ -384,6 +391,7 @@ config = {
     <meta name="viewport" content="minimal-ui, width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1, user-scalable=no"">
 
     <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+    <link rel="stylesheet" type="text/css" href="{{cookiecutter.cdn}}/cssreset-min.css">
 
     <style>
         #status {
@@ -467,7 +475,7 @@ config = {
 
         .framed{
            position: relative;
-           top: 00px;
+           top: 0px;
            right: 0px;
            border: 1px solid white;
         }
@@ -513,14 +521,10 @@ allowtransparency="true"
 style="z-index: 10;"
 style="background: #FFFFFF;"
 frameborder="1"
-                allowfullscreen="true"
-                webkitallowfullscreen="true"
-                msallowfullscreen="true"
-                mozallowfullscreen="true"
-                sandbox="allow-same-origin allow-top-navigation allow-scripts allow-pointer-lock"
-                allow="autoplay; fullscreen *; geolocation; microphone; camera; midi; monetization; xr-spatial-tracking; gamepad; gyroscope; accelerometer; xr; cross-origin-isolated"
-                src="{{cookiecutter.cdn}}../../archives/lib/index.html"
-                scrolling="yes">
+    sandbox="allow-same-origin allow-top-navigation allow-scripts allow-pointer-lock"
+    allow="autoplay; fullscreen *; geolocation; microphone; camera; midi; monetization; xr-spatial-tracking; gamepad; gyroscope; accelerometer; xr; cross-origin-isolated"
+    src="{{cookiecutter.cdn}}../../cdn/lib/index.html"
+    scrolling="yes">
 </iframe>
 
 
@@ -584,8 +588,6 @@ function dragOverHandler(event) {
 
 }
 
-
-
 async function custom_onload(debug_hidden) {
     // this is called before anything python is loaded
     // make your js customization here
@@ -593,78 +595,6 @@ async function custom_onload(debug_hidden) {
     pyconsole.hidden = debug_hidden
     box.hidden =  debug_hidden
 }
-
-
-var dlfcn_handle_id = 0
-var dlfcn_handles = {}
-var dlfcn_retval = {}
-
-function dlvoid(hexstack) {
-    //const dlhandler = document.getElementById("dlhandler").contentWindow
-    //window.console.log(`dlhandler.postMessage("${hexstack}")`)
-    dlhandler.postMessage(hexstack, "*")
-}
-
-function * dlcall(callid, hexstack) {
-    //const dlhandler = document.getElementById("dlhandler").contentWindow
-    dlhandler.postMessage(hexstack, "*")
-    while (!dlfcn_retval[callid])
-        yield 0
-    yield dlfcn_retval[callid]
-}
-
-
-function * dlopen(lib) {
-    dlfcn_handle_id += 1
-    const linkid =  lib + "_" + dlfcn_handle_id
-//    const dlhandler = document.getElementById("dlhandler").contentWindow
-
-    console.log("dlopen: opening :", linkid)
-
-// wait for lazy iframe case
-    while (!dlfcn_handles["dlopen"])
-        yield 0
-
-    dlhandler.postMessage("dlopen:"+lib+":"+ linkid , "*")
-    while (!dlfcn_handles[linkid])
-        yield 0
-
-    yield linkid
-}
-
-function from_hex(h) {
-    var s = ''
-    for (var i = 0; i < h.length; i+=2) {
-        s += String.fromCharCode(parseInt(h.substr(i, 2), 16))
-    }
-    return decodeURIComponent(escape(s))
-}
-
-function rx(event) {
-    const rxmsg = ""+event.data
-    const origin = event.origin
-
-    var e = rxmsg.split(':')
-    const rt = e.shift()
-    if (rt == "dlopen") {
-        const serial = e.shift()
-        if (serial =="") {
-            const linkid = e.shift()
-            dlfcn_handles[linkid] = linkid
-        // call returned value
-        } else {
-            dlfcn_retval[serial] = from_hex(e.shift())
-        }
-    } else {
-        console.warn("bus(567)",rxmsg, origin)
-    }
-
-    if (origin) {
-        //console.log("forwarding",rxmsg)
-    }
-}
-
-window.addEventListener("message", rx, false);
 
 function custom_prerun(){
     // no python main and no (MEMFS + VFS) yet.
@@ -685,11 +615,6 @@ function debug() {
     Module.PyRun_SimpleString("shell.uptime()")
     window_resize()
 }
-
-// Hides mobile browser's address bar when page is done loading.
-window.addEventListener('load', function(e) {
-    setTimeout(function() { window.scrollTo({left:0, top:1080, behaviour :"instant"}) }, 1);
-}, false);
 
 </script>
 

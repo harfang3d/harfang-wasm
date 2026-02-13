@@ -18,7 +18,9 @@ then
     fi
 fi
 
-ln -s $(pwd)/src/pygbag $(pwd)/pygbag
+
+
+# [ -L $(pwd)/pygbag ] || -sf $(pwd)/src/pygbag $(pwd)/pygbag
 
 pushd src/pygbag/support
 cp -r _xterm_parser ${SDKROOT}/prebuilt/emsdk/common/site-packages/
@@ -42,6 +44,18 @@ export DYNLOAD=${SDKROOT}/prebuilt/emsdk/${PYBUILD}/lib-dynload
 . $SDKROOT/emsdk/emsdk_env.sh
 
 
+EMPIC=${EMSDK}/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic
+
+# CF_SDL="-sUSE_SDL=3"
+CF_SDL="${PREFIX}/lib/libSDL3.a \
+ ${PREFIX}/lib/libSDL3_image.a ${PREFIX}/lib/libSDL3_ttf.a \
+ $EMPIC/libfreetype.a \
+ $EMPIC/libharfbuzz.a"
+CF_SDL=""
+
+# this one seems always in.
+#  $EMPIC/libal.a"
+
 echo "
     *   building loader $(pwd) for ${VENDOR} / ${PACKAGES}
             PYBUILD=$PYBUILD python${PYMAJOR}${PYMINOR}
@@ -51,19 +65,11 @@ echo "
             PYTHONPYCACHEPREFIX=$PYTHONPYCACHEPREFIX
             HPY=$HPY
             LD_VENDOR=$LD_VENDOR
+
+CF_SDL=$CF_SDL
+
 " 1>&2
 
-
-EMPIC=/opt/python-wasm-sdk/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic
-
-if echo -n $PYBUILD|grep -q 13$
-then
-    MIMALLOC="-I/opt/python-wasm-sdk/emsdk/upstream/emscripten/system/lib/mimalloc/include"
-else
-    MIMALLOC=""
-fi
-
-SUPPORT_FS=""
 
 
 mkdir -p $DIST_DIR/${DISTRO}${PYMAJOR}${PYMINOR}
@@ -86,6 +92,8 @@ done
 
 
 # crosstools, aio and simulator most likely from pygbag
+SUPPORT_FS=""
+
 if [ -d src/pygbag/support/cross ]
 then
     CROSS=$(realpath src/pygbag/support/cross)
@@ -118,23 +126,23 @@ fi
 
 export PATCH_FS="--preload-file $(realpath platform_wasm/platform_wasm)@/data/data/org.python/assets/site-packages/platform_wasm"
 
-# =2 will break pyodide module reuses
-LOPTS="-sMAIN_MODULE=1"
+# =2 would break pyodide module reuses
+LOPTS="-sENVIRONMENT=node,web -sMAIN_MODULE=1"
 
 # O0/g3 is much faster to build and easier to debug
 
 
 echo "  ************************************"
-if [ -f dev ]
+if ${DEV:-false}
 then
-    export COPTS="-O1 -g1 -fPIC"
+    export COPTS="-O0 -g3 -fPIC --source-map-base http://localhost:8000/maps/"
     echo "       building DEBUG $COPTS"
-    LOPTS="$LOPTS -sASSERTIONS=0"
-    ALWAYS_FS="--preload-file ${ALWAYS_CODE}@/data/data/org.python/assets"
+    LOPTS="$COPTS $LOPTS -sASSERTIONS=0"
+#    ALWAYS_FS="--preload-file ${ALWAYS_CODE}@/data/data/org.python/assets"
 else
     export COPTS="-Os -g0 -fPIC"
     echo "       building RELEASE $COPTS"
-    LOPTS="$LOPTS -sASSERTIONS=0 -sLZ4"
+    LOPTS="$COPTS $LOPTS -sASSERTIONS=0 -sLZ4"
     ALWAYS_FS=""
 fi
 
@@ -204,7 +212,7 @@ if $STATIC
 then
     echo "building static loader"
 else
-    export PACKAGES=${BUILD_STATIC:-emsdk hpy _ctypes}
+    export PACKAGES=${BUILD_STATIC:-"emsdk hpy _ctypes"}
 
     echo "building dynamic loader
 
@@ -231,13 +239,33 @@ echo CPY_CFLAGS=$CPY_CFLAGS
 
 
 
+if [ -f ${WORKSPACE}/integration/${INTEGRATION}.h ]
+then
+    LNK_TEST=${WORKSPACE}/integration/${INTEGRATION}
+else
+    LNK_TEST=/tmp/pygbag_integration_test
+fi
 
-if emcc -fPIC -std=gnu99 -D__PYDK__=1 -DNDEBUG $MIMALLOC $CPY_CFLAGS $CF_SDL $CPOPTS \
+INC_TEST="${LNK_TEST}.h"
+MAIN_TEST="${LNK_TEST}.c"
+
+
+touch ${INT_TEST} ${INC_TEST} ${LNK_TEST} ${MAIN_TEST}
+
+# -L${SDKROOT}/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/pic only !
+
+if emcc -D__PYGBAG__ -fPIC -std=gnu99 -DNDEBUG $CPY_CFLAGS $CF_SDL $CPOPTS \
+ -DINC_TEST=$INC_TEST -DMAIN_TEST=$MAIN_TEST \
  -c -fwrapv -Wall -Werror=implicit-function-declaration -fvisibility=hidden \
- -I${PYDIR}/internal -I${PYDIR} -I./support -I./external/hpy/hpy/devel/include -DPy_BUILD_CORE\
+ -I${PYDIR}/internal -I${PYDIR} -I./support -I./external/hpy/hpy/devel/include -DPy_BUILD_CORE \
  -o build/${MODE}.o support/__EMSCRIPTEN__-pymain.c
 then
-    STDLIBFS="--preload-file build/stdlib-rootfs/python${PYBUILD}@/usr/lib/python${PYBUILD}"
+    if ${HPY}-config --abiflags| grep -q t$
+    then
+        STDLIBFS="--preload-file build/stdlib-rootfs/python${PYBUILD}t@/usr/lib/python${PYBUILD}t"
+    else
+        STDLIBFS="--preload-file build/stdlib-rootfs/python${PYBUILD}@/usr/lib/python${PYBUILD}"
+    fi
 
     # \
     # --preload-file /usr/share/terminfo/x/xterm@/usr/share/terminfo/x/xterm \
@@ -245,28 +273,30 @@ then
     # --preload-file ${REQUIREMENTS}@/data/data/org.python/assets/site-packages \
     # --preload-file ${ROOT}/support/xterm@/etc/termcap \
 
-
 # TODO: test -sWEBGL2_BACKWARDS_COMPATIBILITY_EMULATION
 
-#
+# --use-port=contrib.glfw3
+    #LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
 
     LDFLAGS="-sUSE_GLFW=3 -sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1 -sFULL_ES2 -sFULL_ES3"
 
-    LDFLAGS="$LDFLAGS -lsqlite3"
 
-    LDFLAGS="-L${SDKROOT}/devices/emsdk/usr/lib $LDFLAGS -lssl -lcrypto -lffi -lbz2 -lz -ldl -lm"
+    LDFLAGS="-L${SDKROOT}/devices/emsdk/usr/lib $LDFLAGS -lssl -lcrypto -lsqlite3 -lffi -lbz2 -lz -ldl -lm"
 
     LINKPYTHON="python mpdec expat"
 
-    if  echo $PYBUILD|grep -q 3.12
+
+    if [ ${PYMINOR} -ge 14 ]
     then
-        LINKPYTHON="Hacl_Hash_SHA2 $LINKPYTHON"
+        LDFLAGS="$LDFLAGS -lzstd"
+        LINKPYTHON="_hacl $LINKPYTHON"
     else
-        if  echo $PYBUILD|grep -q 3.13
+        if [ ${PYMINOR} -ge 11 ]
         then
-            LINKPYTHON="Hacl_Hash_SHA2 $LINKPYTHON"
+            LINKPYTHON="Hacl_Hash_SHA2 Hacl_Hash_Blake2 $LINKPYTHON"
         fi
     fi
+
 
     for lib in $LINKPYTHON
     do
@@ -274,15 +304,34 @@ then
         if [ -f $cpylib ]
         then
             LDFLAGS="$LDFLAGS $cpylib"
+        else
+            echo "  WARNING: Not found : $cpylib"
         fi
     done
+
+    # 3.13 and up may rely on system mpdec
+    if echo $LDFLAGS|grep libmpdec
+    then
+        echo -n
+    else
+        LDFLAGS="$LDFLAGS -lmpdec"
+    fi
 
 
     for lib in $PACKAGES
     do
         cpylib=${SDKROOT}/prebuilt/emsdk/lib${lib}${PYBUILD}.a
-        LDFLAGS="$LDFLAGS $cpylib"
+        if [ -f $cpylib ]
+        then
+            LDFLAGS="$LDFLAGS $cpylib"
+        else
+            echo "  WARNING:  Not found : $cpylib"
+        fi
     done
+
+
+    LDFLAGS="$LDFLAGS $(cat $LNK_TEST) -lembind"
+
 
     echo "
 
@@ -295,12 +344,14 @@ then
 
     cat > final_link.sh <<END
 #!/bin/bash
-emcc \\
+. $SDKROOT/emsdk/emsdk_env.sh
+echo COPTS=$COPTS
+echo LOPTS=$LOPTS
+COPTS="$LOPTS" emcc -D__PYGBAG__ \\
  $FINAL_OPTS \\
- $LOPTS \\
- -D__PYDK__=1 -DNDEBUG \\
-     -sTOTAL_MEMORY=256MB -sSTACK_SIZE=4MB -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \\
-    -sEXPORTED_RUNTIME_METHODS=FS \\
+ -DNDEBUG  \\
+     -sTOTAL_MEMORY=256MB -sSTACK_SIZE=8MB -sALLOW_TABLE_GROWTH -sALLOW_MEMORY_GROWTH \\
+    -sEXPORTED_RUNTIME_METHODS=FS,print,createContext \\
      $CF_SDL \\
      --use-preload-plugins \\
      $STDLIBFS \\
@@ -310,23 +361,13 @@ emcc \\
      --preload-file ${DYNLOAD}@/usr/lib/python${PYBUILD}/lib-dynload \\
      --preload-file ${REQUIREMENTS}@/data/data/org.python/assets/site-packages \\
      -o ${DIST_DIR}/${DISTRO}${PYMAJOR}${PYMINOR}/${MODE}.js build/${MODE}.o \\
-     $LDFLAGS -lembind
-
-# -lfreetype
-
-# --bind -fno-rtti
-
-# -sERROR_ON_UNDEFINED_SYMBOLS=0
-# -sGL_ENABLE_GET_PROC_ADDRESS
-
-# --bind -fno-rtti
-
+     $LDFLAGS
 
 END
     chmod +x ./final_link.sh
     if ./final_link.sh
     then
-        rm build/${MODE}.o
+        #rm build/${MODE}.o
         du -hs ${DIST_DIR}/*
         echo Total
         echo _________
@@ -366,13 +407,6 @@ END
             done
             popd
         fi
-#echo "
-#    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#    emsdk tot js gen temp fix
-#    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#"
-#        sed -i 's/_glfwSetWindowContentScaleCallback_sig=iii/_glfwSetWindowContentScaleCallback_sig="iii"/g' \
-#         ${DIST_DIR}/python${PYMAJOR}${PYMINOR}/${MODE}.js
         du -hs ${DIST_DIR}/*
     else
         echo "pymain+loader linking failed"

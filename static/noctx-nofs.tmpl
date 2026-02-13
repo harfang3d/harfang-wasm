@@ -3,7 +3,7 @@
 print("""
 Loading {{cookiecutter.title}} from {{cookiecutter.archive}}.apk
     Pygbag Version : {{cookiecutter.version}}
-    Template Version : 0.9.3
+    Template Version : 0.9.2
     Python  : {{cookiecutter.PYBUILD}}
     CDN URL : {{cookiecutter.cdn}}
     Screen  : {{cookiecutter.width}}x{{cookiecutter.height}}
@@ -19,6 +19,37 @@ import asyncio
 import platform
 import json
 from pathlib import Path
+
+# screen pixels (real, hardware)
+WIDTH=1024  # {{cookiecutter.width}}
+HEIGHT=600  # {{cookiecutter.height}}
+
+# reference/idealized screen pixels
+REFX = 1980
+REFY = 1080
+
+def u(real, ref, v):
+    if abs(v)<0.9999999:
+        result = int( (float(real)/100.0) * (v*1000))
+        if v<0:
+            return real-result
+        return result
+    return int( (real/ref) * v )
+
+def ux(*argv):
+    global WIDTH, REFX
+    acc = 0
+    for v in argv:
+        acc += u(WIDTH, REFX, v)
+    return acc
+
+def uy(*argv):
+    global HEIGHT, REFY
+    acc = 0
+    for v in argv:
+        acc += u(HEIGHT, REFY, v)
+    return acc
+
 
 # do not rename
 async def custom_site():
@@ -36,31 +67,27 @@ async def custom_site():
     appdir.mkdir()
 
 
-    # unpack filesystem from compressed archive into work dir
-    if platform.window.location.host.find('.itch.zone')>0:
-        import zipfile
-        async with platform.fopen("{{cookiecutter.archive}}.apk", "rb") as archive:
-            with zipfile.ZipFile(archive) as zip_ref:
-                zip_ref.extractall(appdir.as_posix())
-    else:
-        import tarfile
-        async with platform.fopen("{{cookiecutter.archive}}.tar.gz", "rb") as archive:
-            tar = tarfile.open(fileobj=archive, mode="r:gz")
-            tar.extractall(path=appdir.as_posix(), filter='tar')
-            tar.close()
+    # unpack filesystem from compressed archive
+    import tarfile
+    async with platform.fopen("{{cookiecutter.archive}}.tar.gz", "rb") as archive:
+        tar = tarfile.open(fileobj=archive, mode="r:gz")
+        tar.extractall(path=appdir.as_posix(), filter='tar')
+        tar.close()
 
-    # preloader will change to work dir and prepend it to sys.path
+    marginx = ux(.020) # 20%
+    marginy = uy(.045) # 45%
+
+
+    # preloader will change dir and prepend it to sys.path
     platform.run_main(PyConfig, loaderhome= appdir / "assets", loadermain=None)
 
 
-    # wait preloading complete : that includes images and wasm compilation of bundled modules
+    # wait preloading complete
+    # that includes images and wasm compilation of bundled modules
     while embed.counter()<0:
         await asyncio.sleep(.1)
 
     main = appdir / "assets" / "main.py"
-
-    # TODO: test for window.webkitAudioContext and block aio loop until gesture if accessing media manager play
-    # before a gesture is recorded ( touch or click )
 
     # test/wait user media interaction
     if not platform.window.MM.UME:

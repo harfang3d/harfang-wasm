@@ -1,27 +1,6 @@
 "use strict";
 
-/*  BF2 is still broken see  https://github.com/jvilk/BrowserFS/issues/325
-import { configure, BFSRequire, EmscriptenFS } from './browserfs.mjs';
-//import { Buffer } from 'buffer';
-
-window.BrowserFS = {}
-window.BrowserFS.configure = configure
-window.BrowserFS.BFSRequire = BFSRequire
-window.BrowserFS.EmscriptenFS = EmscriptenFS
-window.BrowserFS.Buffer = BFSRequire('buffer')
-*/
-var bfs2 = false
-
-async function import_browserfs() {
-    if (window.BrowserFS)
-        return
-    console.warn("late import", config.cdn+"browserfs.min.js" )
-    var script = document.createElement("script")
-    script.src = vm.config.cdn + "browserfs.min.js"
-    document.head.appendChild(script)
-    await _until(defined)("BrowserFS")
-}
-
+WebAssembly.promising = null
 
 /*  Facilities implemented in js
 
@@ -36,7 +15,6 @@ async function import_browserfs() {
 */
 
 const module_name = "pythons.js"
-
 
 var config
 
@@ -87,7 +65,7 @@ window.addEventListener("error", function (e) {
 })
 
 window.addEventListener('unhandledrejection', function (e) {
-  alert("Error occurred: " + e.reason.message);
+  alert("Rejection occurred: " + e.reason.message);
 })
 
 function reverse(s){
@@ -304,7 +282,7 @@ function is_iframe() {
 // https://emscripten.org/docs/api_reference/Filesystem-API.html
 
 function prerun(VM) {
-    console.warn("VM.prerun")
+    console.warn("VM.prerun:Begin")
     // https://github.com/emscripten-core/emscripten/issues/4515
     // VM.FS = FS
     const sixel_prefix = String.fromCharCode(27)+"Pq"
@@ -402,18 +380,18 @@ function prerun(VM) {
     VM.arguments.push(VM.APK)
 
     VM.FS.init(stdin, stdout, stderr);
-
+    console.warn("VM.prerun:End")
 }
 
 
-async function postrun(VM) {
+async function postrun(vm) {
     console.warn("VM.postrun Begin")
-    window.VM = VM
-    window.python = VM
-    window.py = new bridge(VM)
+    window.python = vm
+    window.py = new bridge(vm)
+    window.VM = vm
 
     var pyrc_url = vm.config.cdn + VM.script.interpreter + "rc.py"
-
+    console.log("Maybe RC", pyrc_url)
     await fetch(pyrc_url, {})
         .then( response => checkStatus(response) && response.arrayBuffer() )
         .then( buffer => run_pyrc(new Uint8Array(buffer)) )
@@ -650,8 +628,6 @@ function feat_gui(debug_hidden) {
         return new_canvas
     }
 
-
-
     if (!canvas2d) {
         canvas2d =  add_canvas("canvas")
         canvas2d.style.position = "absolute"
@@ -675,10 +651,8 @@ console.warn("TODO: user defined canvas")
         canvas3d.style.position = "absolute"
         canvas3d.style.bottom = "0px"
         canvas3d.style.left = "0px"
-
     }
     vm.canvas3d = canvas3d
-
 
     canvas.addEventListener("click", MM.focus_handler)
 /*
@@ -787,17 +761,10 @@ console.warn("TODO: user defined canvas")
         const canvas = vm.canvas3d
         divider = divider || 1
         if ( (canvas.width==1) && (canvas.height==1) ){
-            console.log("canvas context not set yet")
+            console.log("Canvas3D: context not set yet")
             setTimeout(window_canvas_adjust_3d, 100, divider);
             return;
         }
-
-        if (!vm.config.fb_ar) {
-            vm.config.fb_width = canvas.width
-            vm.config.fb_height = canvas.height
-            vm.config.fb_ar  =  canvas.width / canvas.height
-        }
-
 
         var want_w
         var want_h
@@ -806,7 +773,7 @@ console.warn("TODO: user defined canvas")
 
         const dpr = window.devicePixelRatio
         if (dpr != 1 )
-            console.warn("Unsupported device pixel ratio", dpr)
+            console.warn("Canvas3D: Unsupported device pixel ratio", dpr)
 
         // default is maximize
         // default is maximize
@@ -817,7 +784,7 @@ console.warn("TODO: user defined canvas")
 
 
         if (vm.config.debug)
-            console.log("window3D[DEBUG:CORRECTED]:", want_w, want_h, ar, divider)
+            console.log("Canvas3D:", want_w, want_h, ar, divider)
 
         // keep fb ratio
         want_w = Math.trunc(want_w / divider )
@@ -863,51 +830,34 @@ console.warn("TODO: user defined canvas")
 
     }
 
-    function window_resize_3d(gui_divider) {
-console.log(" @@@@@@@@@@@@@@@@@@@@@@ 3D CANVAS @@@@@@@@@@@@@@@@@@@@@@")
-        setTimeout(window_canvas_adjust_3d, 200, gui_divider);
-        setTimeout(window.focus, 300);
-    }
-
-    function window_resize_2d(gui_divider) {
-        // don't interfere if program want to handle canvas placing/resizing
-        if (vm.config.user_canvas_managed)
-            return vm.config.user_canvas_managed
-
-        if (!window.canvas) {
-            console.warn("777: No canvas defined")
-            return
-        }
-
-        setTimeout(window_canvas_adjust, 200, gui_divider);
-        setTimeout(window.focus, 300);
-    }
-
-
-
-    function window_resize_event() {
-        // special management for 3D ctx
+    function window_resize() {
+        // TODO: need special management for 3D ctx
         if (vm.config.user_canvas_managed==3) {
-            window_resize(vm.config.gui_divider)
-            return
-        }
-        window_resize(vm.config.gui_divider)
-    }
+            setTimeout(window_canvas_adjust_3d, 100, vm.config.gui_divider);
+        } else {
+            // don't interfere if program want to handle canvas placing/resizing
+            if (vm.config.user_canvas_managed)
+                return vm.config.user_canvas_managed
 
-    window.addEventListener('resize', window_resize_event);
-    if (vm.config.user_canvas_managed==3)
-        window.window_resize = window_resize_3d
-    else
-        window.window_resize = window_resize_2d
+            if (!window.canvas) {
+                console.warn("777: No canvas defined")
+                return
+            }
+            setTimeout(window_canvas_adjust, 100, vm.config.gui_divider);
+
+        }
+        setTimeout(window.focus, 100);
+    }
+    globalThis.window_resize = window_resize
 
     vm.canvas = canvas2d || canvas3d
+    window.addEventListener('resize', window_resize);
     return vm.canvas
 }
 
 
 
 // file transfer (upload)
-
 
 
 
@@ -968,11 +918,6 @@ window.uploaded_file_count = 0
 
 async function feat_fs(debug_hidden) {
 
-    if (!window.BrowserFS) {
-        await import_browserfs()
-    }
-
-
     var dlg_multifile = document.getElementById("dlg_multifile")
     if (!dlg_multifile) {
         dlg_multifile = document.createElement('input')
@@ -991,6 +936,26 @@ async function feat_fs(debug_hidden) {
 
 }
 
+// js.SMP
+
+function feat_smp() {
+    var dlhandler = document.getElementById('dlhandler')
+    if (!dlhandler) {
+        dlhandler = document.createElement('iframe')
+        dlhandler.id = "dlhandler"
+        dlhandler.name = "dlhandler"
+        dlhandler.loading = "lazy"
+        dlhandler.width = "470px"
+        dlhandler.height = "30%"
+dlhandler.style = "position: absolute;bottom: 12px;right: 12px;border: 1px solid red;"
+
+        dlhandler.frameborder = "1"
+        dlhandler.sandbox="allow-same-origin allow-top-navigation allow-scripts allow-pointer-lock"
+        dlhandler.allow="autoplay; fullscreen *; geolocation; microphone; camera; midi; monetization; xr-spatial-tracking; gamepad; gyroscope; accelerometer; xr; cross-origin-isolated"
+        dlhandler.src=config.cdn+"../../cdn/lib/index.html"
+        document.body.appendChild(dlhandler)
+    }
+}
 
 // js.VT
 
@@ -1010,7 +975,7 @@ async function feat_vt(debug_hidden) {
         document.body.appendChild(stdio)
     }
 
-    const { Terminal, helper, handlevt } = await import("./vt.js")
+    const { Terminal, helper, handlevt } = await import("../vt.js")
 
     vm.vt.xterm = new Terminal("stdio", get_terminal_cols(), get_terminal_lines())
     vm.vt.xterm.set_vm_handler(vm, null, null)
@@ -1044,16 +1009,24 @@ async function feat_vtx(debug_hidden) {
         cons = 0
     }
 
-    const { WasmTerminal } = await import("./vtx.js")
+    const { WasmTerminal } = await import("../vtx.js")
     const lines = get_terminal_lines() + cons  // including virtual get_terminal_console()
     const py = window.document.body.clientHeight
-    var fntsize = Math.floor(py/lines) - 1
+    var fntsize = Math.floor(py/lines) - 3
 
     if (lines<=33) {
-        fntsize = ( fntsize - 5 ) / console_divider
+        fntsize = ( fntsize - 6 ) / console_divider
+        console.log("vtx font: less than 33 lines : forced font to", fntsize)
     }
 
-    console.warn("fnt:",window.document.body.clientHeight ,"/", lines,"=", fntsize, " Cols:", cols, "Cons:", cons)
+    if (navigator.vendor.indexOf("Goo") != -1 ) {
+        fntsize = Math.floor( fntsize  * 0.95 )
+        console.log("vtx font: -5%")
+    } else {
+        console.log("vtx font: 100%")
+    }
+
+    console.warn("vtx font:",window.document.body.clientHeight ,"/", lines,"=", fntsize, " Cols:", cols, "Cons:", cons)
     vm.vt = new WasmTerminal(
         "terminal",
         cols,
@@ -1221,13 +1194,7 @@ __EMSCRIPTEN__.EventTarget.build('${ev.name}', '''${ev.data}''')
 
 // js.MM
 // =============================  media manager ===========================
-
-// js.MM.download
-function download(diskfile, filename) {
-    if (!filename)
-        filename = diskfile.rsplit("/").pop()
-
-    const blob = new Blob([FS.readFile(diskfile)])
+function dl_blob(blob) {
     const elem = window.document.createElement('a');
     elem.href = window.URL.createObjectURL(blob, { oneTimeOnly: true });
     elem.download = filename;
@@ -1236,6 +1203,18 @@ function download(diskfile, filename) {
     document.body.removeChild(elem);
 }
 
+// js.MM.download
+function download(diskfile, filename) {
+    if (!filename)
+        filename = diskfile.rsplit("/").pop()
+    const blob = new Blob([FS.readFile(diskfile)])
+    dl_blob(blob, filename)
+}
+
+window.core = function () {
+    const blob = new Blob([wasmMemory.buffer], { type: 'application/octet-binary;charset=utf-8' })
+    dl_blob(blob, "dump.wasm")
+}
 
 
 window.MM = {
@@ -1269,87 +1248,8 @@ async function media_prepare(trackid) {
         return
     }
 
-
     if (track.type === "mount") {
-
-        if (!vm.BFS) {
-            await import_browserfs()
-
-            // how is passed the FS object ???
-            vm.BFS = new BrowserFS.EmscriptenFS()  // {FS:vm.FS}
-
-            vm.BFS.Buffer = BrowserFS.BFSRequire('buffer').Buffer
-        }
-
-        // async
-        MM[trackid].media = await vm.BFS.Buffer.from( MM[trackid].data )
-
-        track.mount.path = track.mount.path || '/' //??=
-
-        const hint = `${track.mount.path}@${track.mount.point}:${trackid}`
-
-        if (!vm.BFS) {
-            // how is passed the FS object ???
-            vm.BFS = new BrowserFS.EmscriptenFS()  // {FS:vm.FS}
-            vm.BFS.Buffer = BrowserFS.BFSRequire('buffer').Buffer
-        }
-
-        const track_media = MM[trackid].media
-
-        if (!bfs2) {
-            console.warn(" ==================== BFS1 ===============")
-            BrowserFS.InMemory = BrowserFS.FileSystem.InMemory
-            BrowserFS.OverlayFS = BrowserFS.FileSystem.OverlayFS
-            BrowserFS.MountableFileSystem = BrowserFS.FileSystem.MountableFileSystem
-            BrowserFS.ZipFS = BrowserFS.FileSystem.ZipFS
-
-            function apk_cb(e, apkfs){
-                console.log(__FILE__, "1225: mounting", hint, "onto", track.mount.point)
-
-                BrowserFS.InMemory.Create(
-                    function(e, memfs) {
-                        BrowserFS.OverlayFS.Create({"writable" :  memfs, "readable" : apkfs },
-                            function(e, ovfs) {
-                                BrowserFS.MountableFileSystem.Create({
-                                    '/' : ovfs
-                                    }, async function(e, mfs) {
-                                        await BrowserFS.initialize(mfs)
-                                        await vm.FS.mount(vm.BFS, {root: track.mount.path}, track.mount.point)
-                                        console.log("1236: mount complete")
-                                        setTimeout(()=>{track.ready=true}, 0)
-                                    })
-                            }
-                        );
-                    }
-                );
-            }
-
-            await BrowserFS.ZipFS.Create(
-                {"zipData" : track_media, "name": hint},
-                apk_cb
-            )
-
-        } else { // bfs1
-            console.warn(" ==================== BFS2 ===============")
-
-            // assuming FS is from Emscripten
-            await BrowserFS.configure({
-                fs: 'MountableFileSystem',
-                options: {
-                    '/': {
-                        fs: 'OverlayFS',
-                        options: {
-                            readable: { fs: 'ZipFS', options: { zipData: track_media, name: 'hint'  } },
-                            writable: { fs: 'InMemory' }
-                        }
-                    }
-                }
-            });
-
-            vm.FS.mount(vm.BFS, { root: track.mount.path, }, track.mount.point);
-            setTimeout(()=>{track.ready=true}, 0)
-        } // bfs2
-
+        // was browserfs , removed must be fully provided from template.
     } // track type mount
 }
 
@@ -1374,8 +1274,6 @@ function MM_play(track, loops) {
         });
     }
 }
-
-
 
 
 window.cross_track = async function cross_track(trackid, url, flags) {
@@ -2082,35 +1980,87 @@ window.Fetch.GET = function * GET (url, flags)
     }
 }
 
-
-
 // ====================================================================================
-//          pyodide compat layer
+//          dlfcn
 // ====================================================================================
 
+var dlfcn_handle_id = 0
+var dlfcn_handles = {}
+var dlfcn_retval = {}
 
-window.loadPyodide =
-    async function loadPyodide(cfg) {
-        vm.runPython =
-            function runPython(code) {
-                console.warn("runPython N/I", code)
-                vm.PyRun_SimpleString(code)
-                return 'N/A'
-            }
+function dlvoid(hexstack) {
+    //const dlhandler = document.getElementById("dlhandler").contentWindow
+    //window.console.log(`dlhandler.postMessage("${hexstack}")`)
+    dlhandler.postMessage(hexstack, "*")
+}
 
-        console.warn("loadPyodide N/I")
-        auto_start(cfg)
-        auto_start = null
-        await onload()
-        onload = null
-        await _until(defined)("python")
-        vm.vt.xterm.write = cfg.stdout
-        console.warn("using ", python)
-        return vm
+function * dlcall(callid, hexstack) {
+    //const dlhandler = document.getElementById("dlhandler").contentWindow
+    dlhandler.postMessage(hexstack, "*")
+    while (!dlfcn_retval[callid])
+        yield 0
+    yield dlfcn_retval[callid]
+}
+window.dlcall = dlcall
+
+function * dlopen(lib) {
+    dlfcn_handle_id += 1
+    const linkid =  lib + "_" + dlfcn_handle_id
+//    const dlhandler = document.getElementById("dlhandler").contentWindow
+
+    console.log("dlopen: opening :", linkid)
+
+// wait for lazy iframe case
+    while (!dlfcn_handles["dlopen"])
+        yield 0
+
+    dlhandler.postMessage("dlopen:"+lib+":"+ linkid , "*")
+    while (!dlfcn_handles[linkid])
+        yield 0
+
+    yield linkid
+}
+window.dlopen = dlopen
+
+function from_hex(h) {
+    var s = ''
+    for (var i = 0; i < h.length; i+=2) {
+        s += String.fromCharCode(parseInt(h.substr(i, 2), 16))
+    }
+    return decodeURIComponent(escape(s))
+}
+
+function rx(event) {
+    const rxmsg = ""+event.data
+    const origin = event.origin
+
+    var e = rxmsg.split(':')
+    const rt = e.shift()
+    if (rt == "dlopen") {
+        const serial = e.shift()
+        if (serial =="") {
+            const linkid = e.shift()
+            dlfcn_handles[linkid] = linkid
+        // call returned value
+        } else {
+            dlfcn_retval[serial] = from_hex(e.shift())
+        }
+    } else {
+        console.warn("bus(2158)",rxmsg, origin)
     }
 
+    if (origin) {
+        //console.log("forwarding",rxmsg)
+    }
+}
+
+window.addEventListener("message", rx, false);
+
+
+
+
 // ====================================================================================
-//          STARTUP
+//  Window  STARTUP
 // ====================================================================================
 
 async function onload() {
@@ -2173,10 +2123,7 @@ async function onload() {
     var has_vt = false
 
     for (const feature of vm.config.features) {
-        if (feature.startsWith("3d")) {
-            vm.config.user_canvas_managed = 3
-        }
-
+        // embed is for canvas only, do not handle anything else.
         if (feature.startsWith("embed")) {
 
             vm.config.user_canvas_managed = vm.config.user_canvas_managed || 1
@@ -2187,6 +2134,16 @@ async function onload() {
             }
             // only canvas when embedding 2D/3D, stdxxx go to console.
             break
+        }
+
+        // position iframe first
+        if (feature.startsWith("smp")) {
+            // cannot be hidden
+            feat_smp()
+        }
+
+        if (feature.startsWith("3d")) {
+            vm.config.user_canvas_managed = 3
         }
 
         if (feature.startsWith("snd")) {
@@ -2232,9 +2189,12 @@ async function onload() {
         } else {
             console.warn("NO VT/stdout on mobile, use remote debugger or explicit flag")
         }
+
+
+
     }
 
-    // FIXME: forced minimal output until until remote debugger is a thing.
+    // FIXME: forced minimal output until remote debugger is a thing.
     if ( debug_mobile && !has_vt) {
         console.warn("764: debug forced stdout")
         feat_stdout()
@@ -2244,19 +2204,14 @@ async function onload() {
     if (window.custom_onload)
         window.custom_onload(debug_hidden)
 
-
     window.busy--;
-    if (!config.quiet)
-        vm.vt.xterm.write('OK\r\nPlease \x1B[1;3;31mwait\x1B[0m ...\r\n')
-
-
 
     if (window.window_resize)
         window_resize(vm.config.gui_divider)
 
 // console.log("cleanup while loading wasm", "has_parent?", is_iframe(), "Parent:", window.parent)
 
-    feat_snd = feat_gui = feat_fs = feat_vt = feat_vtx = feat_stdout = feat_lifecycle = onload = null
+    feat_smp = feat_snd = feat_gui = feat_fs = feat_vt = feat_vtx = feat_stdout = feat_lifecycle = onload = null
 
     if ( is_iframe() ) {
         try {
@@ -2284,10 +2239,44 @@ async function onload() {
 // -->
     }
 
+
+    // Hides mobile browser's address bar when page is done loading.
+    setTimeout(function() { window.scrollTo({left:0, top:1080, behaviour :"instant"}) }, 1);
+
 // TODO: error alert if 404 / timeout
     console.warn("Loading python interpreter from", config.executable)
     jsimport(config.executable)
 }
+
+// ====================================================================================
+//          pyodide compat layer
+// ====================================================================================
+
+
+window.loadPyodide =
+    async function loadPyodide(cfg) {
+        vm.runPython =
+            function runPython(code) {
+                console.warn("runPython N/I", code)
+                vm.PyRun_SimpleString(code)
+                return 'N/A'
+            }
+
+        console.warn("loadPyodide N/I")
+        auto_start(cfg)
+        auto_start = null
+        await onload()
+        onload = null
+        await _until(defined)("python")
+        vm.vt.xterm.write = cfg.stdout
+        console.warn("using ", python)
+        return vm
+    }
+
+
+// ====================================================================================
+//  JS STARTUP
+// ====================================================================================
 
 
 function auto_conf(cfg) {
@@ -2347,7 +2336,7 @@ function auto_conf(cfg) {
     // TODO: built script override when debug mode (-X dev).
     // actual: no pygbag override.
 
-    const default_version = "3.11"
+    const default_version = "3.12"
     var pystr = "python" + default_version
 
     if (vm.cpy_argv.length && (vm.cpy_argv[0].search('py')>=0)) {
@@ -2541,10 +2530,12 @@ function auto_start(cfg) {
 }
 
 
-window.set_raw_mode = function (param) {
-    window.RAW_MODE = param || 0
+globalThis.__canvas_resized = (self, ecw, ech) => {
+    console.warn("TODO: panda3d canvas monitor", self, ecw, ech)
 }
 
-
+globalThis.set_raw_mode = function (param) {
+    window.RAW_MODE = param || 0
+}
 
 auto_start()
